@@ -22,7 +22,8 @@ class CarliniL2:
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
-                 initial_const = INITIAL_CONST):
+                 initial_const = INITIAL_CONST,
+                 use_log = False):
         """
         The L_2 optimized attack. 
 
@@ -64,7 +65,8 @@ class CarliniL2:
         shape = (batch_size,image_size,image_size,num_channels)
         
         # the variable we're going to optimize over
-        modifier = tf.Variable(np.zeros(shape,dtype=np.float32))
+        self.modifier = tf.Variable(np.zeros(shape,dtype=np.float32))
+        # self.modifier = tf.Variable(np.load('black_iter_350.npy').astype(np.float32).reshape(shape))
 
         # these are variables to be more efficient in sending data to tf
         self.timg = tf.Variable(np.zeros(shape), dtype=tf.float32)
@@ -77,7 +79,7 @@ class CarliniL2:
         self.assign_const = tf.placeholder(tf.float32, [batch_size])
         
         # the resulting image, tanh'd to keep bounded from -0.5 to 0.5
-        self.newimg = tf.tanh(modifier + self.timg)/2
+        self.newimg = tf.tanh(self.modifier + self.timg)/2
         
         # prediction BEFORE-SOFTMAX of the model
         self.output = model.predict(self.newimg)
@@ -86,15 +88,21 @@ class CarliniL2:
         self.l2dist = tf.reduce_sum(tf.square(self.newimg-tf.tanh(self.timg)/2),[1,2,3])
         
         # compute the probability of the label class versus the maximum other
-        real = tf.reduce_sum((self.tlab)*self.output,1)
-        other = tf.reduce_max((1-self.tlab)*self.output - (self.tlab*10000),1)
+        self.real = tf.reduce_sum((self.tlab)*self.output,1)
+        self.other = tf.reduce_max((1-self.tlab)*self.output - (self.tlab*10000),1)
 
         if self.TARGETED:
-            # if targetted, optimize for making the other class most likely
-            loss1 = tf.maximum(0.0, other-real+self.CONFIDENCE)
+            if use_log:
+                loss1 = - tf.log(self.real)
+            else:
+                # if targetted, optimize for making the other class most likely
+                loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)
         else:
+            if use_log:
+                loss1 = tf.log(self.real)
+            else:
             # if untargeted, optimize for making this class least likely.
-            loss1 = tf.maximum(0.0, real-other+self.CONFIDENCE)
+                loss1 = tf.maximum(0.0, self.real-self.other+self.CONFIDENCE)
 
         # sum up the losses
         self.loss2 = tf.reduce_sum(self.l2dist)
@@ -103,8 +111,12 @@ class CarliniL2:
         
         # Setup the adam optimizer and keep track of variables we're creating
         start_vars = set(x.name for x in tf.global_variables())
+        # optimizer = tf.train.GradientDescentOptimizer(self.LEARNING_RATE)
+        # optimizer = tf.train.MomentumOptimizer(self.LEARNING_RATE, 0.99)
+        # optimizer = tf.train.RMSPropOptimizer(self.LEARNING_RATE)
+        # optimizer = tf.train.AdadeltaOptimizer(self.LEARNING_RATE)
         optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
-        self.train = optimizer.minimize(self.loss, var_list=[modifier])
+        self.train = optimizer.minimize(self.loss, var_list=[self.modifier])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
 
@@ -114,7 +126,7 @@ class CarliniL2:
         self.setup.append(self.tlab.assign(self.assign_tlab))
         self.setup.append(self.const.assign(self.assign_const))
         
-        self.init = tf.variables_initializer(var_list=[modifier]+new_vars)
+        self.init = tf.variables_initializer(var_list=[self.modifier]+new_vars)
 
     def attack(self, imgs, targets):
         """
@@ -180,14 +192,17 @@ class CarliniL2:
             
             prev = 1e6
             for iteration in range(self.MAX_ITERATIONS):
+                # print out the losses every 10%
+                if iteration%(self.MAX_ITERATIONS//10) == 0:
+                    print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
+                    # modifier = self.sess.run(self.modifier)
+                    # np.save('white_iter_{}'.format(iteration), modifier)
+                    
+
                 # perform the attack 
                 _, l, l2s, scores, nimg = self.sess.run([self.train, self.loss, 
                                                          self.l2dist, self.output, 
                                                          self.newimg])
-
-                # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//10) == 0:
-                    print(iteration,self.sess.run((self.loss,self.loss1,self.loss2)))
 
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
@@ -208,11 +223,16 @@ class CarliniL2:
             # adjust the constant as needed
             for e in range(batch_size):
                 if compare(bestscore[e], np.argmax(batchlab[e])) and bestscore[e] != -1:
+                    # modifier = self.sess.run(self.modifier)
+                    # np.save("best.model", modifier)
+                    print('old constant: ', CONST[e])
                     # success, divide const by two
                     upper_bound[e] = min(upper_bound[e],CONST[e])
                     if upper_bound[e] < 1e9:
                         CONST[e] = (lower_bound[e] + upper_bound[e])/2
+                    print('new constant: ', CONST[e])
                 else:
+                    print('old constant: ', CONST[e])
                     # failure, either multiply by 10 if no solution found yet
                     #          or do binary search with the known upper bound
                     lower_bound[e] = max(lower_bound[e],CONST[e])
@@ -220,6 +240,7 @@ class CarliniL2:
                         CONST[e] = (lower_bound[e] + upper_bound[e])/2
                     else:
                         CONST[e] *= 10
+                    print('new constant: ', CONST[e])
 
         # return the best solution found
         o_bestl2 = np.array(o_bestl2)

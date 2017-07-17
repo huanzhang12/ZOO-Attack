@@ -16,12 +16,21 @@ from setup_inception import ImageNet, InceptionModel
 from l2_attack import CarliniL2
 from l0_attack import CarliniL0
 from li_attack import CarliniLi
+from l2_attack_black import BlackBoxL2
+
+from PIL import Image
 
 
-def show(img):
+def show(img, name = "output.png"):
     """
     Show MNSIT digits in the console.
     """
+    np.save('img', img)
+    fig = (img + 0.5)*256
+    fig = fig.astype(np.uint8).squeeze()
+    pic = Image.fromarray(fig)
+    # pic.resize((512,512), resample=PIL.Image.BICUBIC)
+    pic.save(name)
     remap = "  .*#"+"#"*100
     img = (img.flatten()+.5)*3
     if len(img) != 784: return
@@ -68,12 +77,10 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 
 if __name__ == "__main__":
     with tf.Session() as sess:
-        use_log = True
-        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
+        use_log = False
+        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess)
-        # data, model = ImageNet(), InceptionModel(sess)
-        attack = CarliniL2(sess, model, batch_size=1, max_iterations=1000, confidence=0, use_log=use_log)
+        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=10000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
                                         start=0, inception=False)
@@ -85,17 +92,11 @@ if __name__ == "__main__":
         
         print("Took",timeend-timestart,"seconds to run",len(inputs),"samples.")
 
-        for i in range(len(adv)):
-            print("Valid:")
-            show(inputs[i])
-            print("Classification:", model.model.predict(inputs[i:i+1]))
-            print("Adversarial:")
-            show(adv[i])
-            
-            print("Classification:", model.model.predict(adv[i:i+1]))
+        print("Valid:")
+        show(inputs[0])
+        print("Adversarial:")
+        show(adv)
+        
+        print("Classification:", model.model.predict(adv.reshape((1,) + adv.shape)))
 
-            print("Total distortion:", np.sum((adv[i]-inputs[i])**2)**.5)
-
-        t = np.random.randn(28*28).reshape(1,28,28,1)
-        print(model.model.predict(t))
-
+        print("Total distortion:", np.sum((adv-inputs[0])**2)**.5)
