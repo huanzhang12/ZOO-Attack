@@ -26,7 +26,7 @@ def show(img, name = "output.png"):
     Show MNSIT digits in the console.
     """
     np.save('img', img)
-    fig = (img + 0.5)*256
+    fig = (img + 0.5)*255
     fig = fig.astype(np.uint8).squeeze()
     pic = Image.fromarray(fig)
     # pic.resize((512,512), resample=PIL.Image.BICUBIC)
@@ -78,12 +78,12 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
-        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        # data, model = CIFAR(), CIFARModel("models/cifar", sess)
-        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=10000, confidence=0, use_log=use_log)
+        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
+        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=2000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=0, inception=False)
+                                        start=1, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
@@ -93,9 +93,9 @@ if __name__ == "__main__":
         print("Took",timeend-timestart,"seconds to run",len(inputs),"samples.")
 
         print("Valid:")
-        show(inputs[0])
+        show(inputs[0], "original.png")
         print("Adversarial:")
-        show(adv)
+        show(adv, "adversarial.png")
         
         print("Classification:", model.model.predict(adv.reshape((1,) + adv.shape)))
 

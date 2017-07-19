@@ -18,17 +18,25 @@ from l0_attack import CarliniL0
 from li_attack import CarliniLi
 
 
-def show(img):
+from PIL import Image
+
+
+def show(img, name = "output.png"):
     """
     Show MNSIT digits in the console.
     """
+    np.save('img', img)
+    fig = (img + 0.5)*255
+    fig = fig.astype(np.uint8).squeeze()
+    pic = Image.fromarray(fig)
+    # pic.resize((512,512), resample=PIL.Image.BICUBIC)
+    pic.save(name)
     remap = "  .*#"+"#"*100
     img = (img.flatten()+.5)*3
     if len(img) != 784: return
     print("START")
     for i in range(28):
         print("".join([remap[int(round(x))] for x in img[i*28:i*28+28]]))
-
 
 def generate_data(data, samples, targeted=True, start=0, inception=False):
     """
@@ -69,14 +77,14 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
-        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
+        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
-        # data, model = CIFAR(), CIFARModel("models/cifar", sess)
-        # data, model = ImageNet(), InceptionModel(sess)
+        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        # data, model = ImageNet(), InceptionModel(sess, use_log)
         attack = CarliniL2(sess, model, batch_size=1, max_iterations=1000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=0, inception=False)
+                                        start=1, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
@@ -87,15 +95,15 @@ if __name__ == "__main__":
 
         for i in range(len(adv)):
             print("Valid:")
-            show(inputs[i])
+            show(inputs[i], "original_{}.png".format(i))
             print("Classification:", model.model.predict(inputs[i:i+1]))
             print("Adversarial:")
-            show(adv[i])
+            show(adv[i], "adversarial_{}.png".format(i))
             
             print("Classification:", model.model.predict(adv[i:i+1]))
 
             print("Total distortion:", np.sum((adv[i]-inputs[i])**2)**.5)
 
-        t = np.random.randn(28*28).reshape(1,28,28,1)
-        print(model.model.predict(t))
+        # t = np.random.randn(28*28).reshape(1,28,28,1)
+        # print(model.model.predict(t))
 

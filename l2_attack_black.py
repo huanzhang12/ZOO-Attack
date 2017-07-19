@@ -17,7 +17,7 @@ ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.01     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.001    # the initial constant c to pick as a first guess
 
 # @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2):
@@ -307,7 +307,7 @@ class BlackBoxL2:
             prev = 1e6
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//100) == 0:
+                if iteration%(self.MAX_ITERATIONS//10) == 0:
                     print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
@@ -316,7 +316,7 @@ class BlackBoxL2:
                 l, l2, score, nimg = self.blackbox_optimizer(iteration)
 
                 # check if we should abort search if we're getting nowhere.
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//50) == 0:
+                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
                     if l > prev*.9999:
                         print("Early stopping because there is no improvement")
                         break
