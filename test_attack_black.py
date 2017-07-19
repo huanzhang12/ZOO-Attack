@@ -77,7 +77,7 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 
 if __name__ == "__main__":
     with tf.Session() as sess:
-        use_log = False
+        use_log = True
         data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess)
         attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=10000, confidence=0, use_log=use_log)

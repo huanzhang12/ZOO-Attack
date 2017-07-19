@@ -142,7 +142,8 @@ class BlackBoxL2:
         # If self.targeted is false, then targets are the original class labels.
         if self.TARGETED:
             if use_log:
-                loss1 = - tf.log(self.real)
+                # loss1 = - tf.log(self.real)
+                loss1 = tf.maximum(- tf.log(self.other), - tf.log(self.real))
             else:
                 # if targetted, optimize for making the other class (real) most likely
                 loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)

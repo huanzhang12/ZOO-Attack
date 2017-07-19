@@ -69,8 +69,8 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
-        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
+        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
+        # data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess)
         # data, model = ImageNet(), InceptionModel(sess)
         attack = CarliniL2(sess, model, batch_size=1, max_iterations=1000, confidence=0, use_log=use_log)
