@@ -11,16 +11,16 @@ import numpy as np
 from numba import jit
 import math
 
-BINARY_SEARCH_STEPS = 9  # number of times to adjust the constant with binary search
+BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.001    # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
 
-# @jit(nopython=True)
-def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2):
+@jit(nopython=True)
+def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
     for i in range(batch_size):
         grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
     # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
@@ -43,7 +43,8 @@ def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modif
     old_val = m[indice] 
     old_val -= lr * corr * mt / (np.sqrt(vt) + 1e-8)
     # set it back to [-0.5, +0.5] region
-    old_val = np.maximum(np.minimum(old_val, up[indice]), down[indice])
+    if proj:
+        old_val = np.maximum(np.minimum(old_val, up[indice]), down[indice])
     m[indice] = old_val
     adam_epoch[indice] = epoch + 1
 
@@ -53,7 +54,7 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False):
+                 use_log = False, use_tanh = True):
         """
         The L_2 optimized attack. 
 
@@ -80,6 +81,7 @@ class BlackBoxL2:
         """
 
         image_size, num_channels, num_labels = model.image_size, model.num_channels, model.num_labels
+        self.model = model
         self.sess = sess
         self.TARGETED = targeted
         self.LEARNING_RATE = learning_rate
@@ -89,6 +91,7 @@ class BlackBoxL2:
         self.CONFIDENCE = confidence
         self.initial_const = initial_const
         self.batch_size = batch_size
+        self.use_tanh = use_tanh
 
         self.repeat = binary_search_steps >= 10
 
@@ -116,8 +119,10 @@ class BlackBoxL2:
         
         # the resulting image, tanh'd to keep bounded from -0.5 to 0.5
         # broadcast self.timg to every dimension of modifier
-        # self.newimg = tf.tanh(self.modifier + self.timg)/2
-        self.newimg = self.modifier + self.timg
+        if use_tanh:
+            self.newimg = tf.tanh(self.modifier + self.timg)/2
+        else:
+            self.newimg = self.modifier + self.timg
         
         # prediction BEFORE-SOFTMAX of the model
         # now we have output at #batch_size different modifiers
@@ -125,8 +130,10 @@ class BlackBoxL2:
         self.output = model.predict(self.newimg)
         
         # distance to the input data
-        # self.l2dist = tf.reduce_sum(tf.square(self.newimg-tf.tanh(self.timg)/2), [1,2,3])
-        self.l2dist = tf.reduce_sum(tf.square(self.newimg - self.timg), [1,2,3])
+        if use_tanh:
+            self.l2dist = tf.reduce_sum(tf.square(self.newimg-tf.tanh(self.timg)/2), [1,2,3])
+        else:
+            self.l2dist = tf.reduce_sum(tf.square(self.newimg - self.timg), [1,2,3])
         
         # compute the probability of the label class versus the maximum other
         # self.tlab * self.output selects the Z value of real class
@@ -173,6 +180,7 @@ class BlackBoxL2:
         self.use_var_len = var_size
         self.var_list = np.array(range(0, self.use_var_len), dtype = np.int32)
         self.used_var_list = np.zeros(var_size, dtype = np.int32)
+        self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
 
         # upper and lower bounds for the modifier
         self.modifier_up = np.zeros(var_size)
@@ -199,13 +207,18 @@ class BlackBoxL2:
         grad = true_grads[0].reshape(-1)
         epoch = self.adam_epoch[0]
         mt = self.beta1 * self.mt + (1 - self.beta1) * grad
-        vt = self.beta2 * self.vt + (1 - self.beta2) * grad * grad
+        vt = self.beta2 * self.vt + (1 - self.beta2) * np.square(grad)
         corr = (math.sqrt(1 - self.beta2 ** epoch)) / (1 - self.beta1 ** epoch)
         # print(grad.shape, mt.shape, vt.shape, self.real_modifier.shape)
         m = self.real_modifier.reshape(-1)
         m -= self.LEARNING_RATE * corr * (mt / (np.sqrt(vt) + 1e-8))
+        self.mt = mt
+        self.vt = vt
+        # m -= self.LEARNING_RATE * grad
+        if not self.use_tanh:
+            m = np.maximum(np.minimum(m, self.modifier_up), self.modifier_down)
         self.adam_epoch[0] = epoch + 1
-        return losses, l2s, scores, nimgs
+        return losses[0], l2s[0], scores[0], nimgs[0]
 
 
     def blackbox_optimizer(self, iteration):
@@ -213,8 +226,9 @@ class BlackBoxL2:
         var = np.repeat(self.real_modifier, self.batch_size * 2 + 1, axis=0)
         var_size = self.real_modifier.size
         # print(s, "variables remaining")
-        var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
-        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
+        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
         indice = self.var_list[var_indice]
         # regenerate the permutations if we run out
         # if self.perm_index + self.batch_size >= var_size:
@@ -226,7 +240,72 @@ class BlackBoxL2:
             var[i * 2 + 1].reshape(-1)[indice[i]] += 0.001
             var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.001
         losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
-        coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2)
+        coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # adjust sample probability, sample around the points with large gradient
+        med = np.sort(np.absolute(self.grad))[-10]
+        ns = self.model.image_size
+        nc = self.model.num_channels
+        self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
+        base_prob = 1.0 / var_size * 1.0
+        def get_coo(c, y, x):
+            return c * (ns * ns) + y * ns + x
+        for i in range(self.batch_size):
+            if self.grad[i] > med:
+                # this is an important pixel, increase the sample probability of nearby pixels
+                ind = indice[i]
+                # convert to 2D 
+                ind_c = ind // (ns * ns)
+                ind_xy = ind % (ns * ns)
+                ind_y = ind_xy // ns
+                ind_x = ind_xy % ns
+                # print(i, ind_c, ind_y, ind_x, self.grad[i])
+                cnt = 0
+                if ind_c != 0:
+                    self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x)] = base_prob
+                    cnt += 1
+                    if ind_x != 0:
+                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x - 1)] = base_prob
+                        cnt += 1
+                    if ind_x != ns - 1:
+                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x + 1)] = base_prob
+                        cnt += 1
+                    if ind_y != 0:
+                        self.sample_prob[get_coo(ind_c - 1, ind_y - 1, ind_x)] = base_prob
+                        cnt += 1
+                    if ind_y != ns - 1:
+                        self.sample_prob[get_coo(ind_c - 1, ind_y + 1, ind_x)] = base_prob
+                        cnt += 1
+                if ind_c != nc - 1:
+                    self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x)] = base_prob
+                    cnt += 1
+                    if ind_x != 0:
+                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x - 1)] = base_prob
+                        cnt += 1
+                    if ind_x != ns - 1:
+                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x + 1)] = base_prob
+                        cnt += 1
+                    if ind_y != 0:
+                        self.sample_prob[get_coo(ind_c + 1, ind_y - 1, ind_x)] = base_prob
+                        cnt += 1
+                    if ind_y != ns - 1:
+                        self.sample_prob[get_coo(ind_c + 1, ind_y + 1, ind_x)] = base_prob
+                        cnt += 1
+                if ind_x != 0:
+                    self.sample_prob[get_coo(ind_c, ind_y, ind_x - 1)] = base_prob
+                    cnt += 1
+                if ind_x != ns - 1:
+                    self.sample_prob[get_coo(ind_c, ind_y, ind_x + 1)] = base_prob
+                    cnt += 1
+                if ind_y != 0:
+                    self.sample_prob[get_coo(ind_c, ind_y - 1, ind_x)] = base_prob
+                    cnt += 1
+                if ind_y != ns - 1:
+                    self.sample_prob[get_coo(ind_c, ind_y + 1, ind_x)] = base_prob
+                    cnt += 1
+                # self.sample_prob[indice] /= (cnt / 2)
+        # renormalize
+        self.sample_prob /= np.sum(self.sample_prob)
+
         # if the gradient is too small, do not optimize on this variable
         # self.var_list = np.delete(self.var_list, indice[np.abs(self.grad) < 5e-3])
         # reset the list every 10000 iterations
@@ -267,7 +346,8 @@ class BlackBoxL2:
                 return x != y
 
         # convert to tanh-space
-        # img = np.arctanh(img*1.999999)
+        if self.use_tanh:
+            img = np.arctanh(img*1.999999)
 
         # set the lower and upper bounds accordingly
         lower_bound = 0.0

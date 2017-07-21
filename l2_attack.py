@@ -9,13 +9,13 @@ import sys
 import tensorflow as tf
 import numpy as np
 
-BINARY_SEARCH_STEPS = 9  # number of times to adjust the constant with binary search
+BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 1e-3     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
 
 class CarliniL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
@@ -116,7 +116,7 @@ class CarliniL2:
         # optimizer = tf.train.MomentumOptimizer(self.LEARNING_RATE, 0.99)
         # optimizer = tf.train.RMSPropOptimizer(self.LEARNING_RATE)
         # optimizer = tf.train.AdadeltaOptimizer(self.LEARNING_RATE)
-        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
+        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE, 0.9, 0.999)
         self.train = optimizer.minimize(self.loss, var_list=[self.modifier])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
@@ -126,6 +126,7 @@ class CarliniL2:
         self.setup.append(self.timg.assign(self.assign_timg))
         self.setup.append(self.tlab.assign(self.assign_tlab))
         self.setup.append(self.const.assign(self.assign_const))
+        # self.grad_op = tf.gradients(self.loss, self.modifier)
         
         self.init = tf.variables_initializer(var_list=[self.modifier]+new_vars)
 
@@ -196,7 +197,8 @@ class CarliniL2:
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//10) == 0:
                     print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
-                    # modifier = self.sess.run(self.modifier)
+                    # grad = self.sess.run(self.grad_op)
+                    # old_modifier = self.sess.run(self.modifier)
                     # np.save('white_iter_{}'.format(iteration), modifier)
                     
 
@@ -204,6 +206,11 @@ class CarliniL2:
                 _, l, l2s, scores, nimg = self.sess.run([self.train, self.loss, 
                                                          self.l2dist, self.output, 
                                                          self.newimg])
+
+                new_modifier = self.sess.run(self.modifier)
+                
+                # print(grad[0].reshape(-1))
+                # print((old_modifier - new_modifier).reshape(-1))
 
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:

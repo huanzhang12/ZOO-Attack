@@ -78,12 +78,12 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
-        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=2000, confidence=0, use_log=use_log)
+        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
+        # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        attack = BlackBoxL2(sess, model, batch_size=28*28//2, max_iterations=1000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=1, inception=False)
+                                        start=3, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
@@ -96,7 +96,9 @@ if __name__ == "__main__":
         show(inputs[0], "original.png")
         print("Adversarial:")
         show(adv, "adversarial.png")
+        show(adv - inputs[0], "diff.png")
         
-        print("Classification:", model.model.predict(adv.reshape((1,) + adv.shape)))
+        print("Valid Classification:", model.model.predict(inputs[0].reshape((1,) + adv.shape)))
+        print("Adversarial Classification:", model.model.predict(adv.reshape((1,) + adv.shape)))
 
         print("Total distortion:", np.sum((adv-inputs[0])**2)**.5)
