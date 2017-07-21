@@ -19,7 +19,7 @@ TARGETED = True          # should we target one specific class? or just be wrong
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
     for i in range(batch_size):
         grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
@@ -230,6 +230,7 @@ class BlackBoxL2:
         var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
         indice = self.var_list[var_indice]
+        # indice = self.var_list
         # regenerate the permutations if we run out
         # if self.perm_index + self.batch_size >= var_size:
         #     self.perm = np.random.permutation(var_size)
@@ -240,6 +241,8 @@ class BlackBoxL2:
             var[i * 2 + 1].reshape(-1)[indice[i]] += 0.001
             var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.001
         losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
+        # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: var})
+        # self.grad = t_grad[0][0].reshape(-1)
         coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         med = np.sort(np.absolute(self.grad))[-10]
@@ -387,7 +390,7 @@ class BlackBoxL2:
             prev = 1e6
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//10) == 0:
+                if iteration%(self.MAX_ITERATIONS//100) == 0:
                     print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
