@@ -80,7 +80,7 @@ if __name__ == "__main__":
         use_log = True
         data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=28*28//2, max_iterations=100, confidence=0, use_log=use_log)
+        attack = BlackBoxL2(sess, model, batch_size=28*28, max_iterations=10, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
                                         start=3, inception=False)

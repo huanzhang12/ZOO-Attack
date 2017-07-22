@@ -19,10 +19,10 @@ TARGETED = True          # should we target one specific class? or just be wrong
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
 
-# @jit(nopython=True)
+@jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
-    for i in range(batch_size):
-        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
+    # for i in range(batch_size):
+    #    grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
     # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
     # true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
     # grad = true_grads[0].reshape(-1)[indice]
@@ -54,7 +54,7 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = True):
+                 use_log = False, use_tanh = False):
         """
         The L_2 optimized attack. 
 
@@ -210,13 +210,16 @@ class BlackBoxL2:
         vt = self.beta2 * self.vt + (1 - self.beta2) * np.square(grad)
         corr = (math.sqrt(1 - self.beta2 ** epoch)) / (1 - self.beta1 ** epoch)
         # print(grad.shape, mt.shape, vt.shape, self.real_modifier.shape)
+        # m is a *view* of self.real_modifier
         m = self.real_modifier.reshape(-1)
+        # this is in-place
         m -= self.LEARNING_RATE * corr * (mt / (np.sqrt(vt) + 1e-8))
         self.mt = mt
         self.vt = vt
         # m -= self.LEARNING_RATE * grad
         if not self.use_tanh:
-            m = np.maximum(np.minimum(m, self.modifier_up), self.modifier_down)
+            m_proj = np.maximum(np.minimum(m, self.modifier_up), self.modifier_down)
+            np.copyto(m, m_proj)
         self.adam_epoch[0] = epoch + 1
         return losses[0], l2s[0], scores[0], nimgs[0]
 
@@ -227,10 +230,10 @@ class BlackBoxL2:
         var_size = self.real_modifier.size
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
-        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
-        indice = self.var_list[var_indice]
-        # indice = self.var_list
+        # indice = self.var_list[var_indice]
+        indice = self.var_list
         # regenerate the permutations if we run out
         # if self.perm_index + self.batch_size >= var_size:
         #     self.perm = np.random.permutation(var_size)
@@ -241,8 +244,8 @@ class BlackBoxL2:
             var[i * 2 + 1].reshape(-1)[indice[i]] += 0.001
             var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.001
         losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
-        # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: var})
-        # self.grad = t_grad[0][0].reshape(-1)
+        t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
+        self.grad = t_grad[0].reshape(-1)
         coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         med = np.sort(np.absolute(self.grad))[-10]
@@ -390,7 +393,7 @@ class BlackBoxL2:
             prev = 1e6
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//100) == 0:
+                if iteration%(self.MAX_ITERATIONS//10) == 0:
                     print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
