@@ -10,6 +10,7 @@ import tensorflow as tf
 import numpy as np
 from numba import jit
 import math
+import time
 
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
@@ -17,12 +18,12 @@ ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.25     # the initial constant c to pick as a first guess
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
-    # for i in range(batch_size):
-    #    grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
+    for i in range(batch_size):
+        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
     # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
     # true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
     # grad = true_grads[0].reshape(-1)[indice]
@@ -150,7 +151,7 @@ class BlackBoxL2:
         if self.TARGETED:
             if use_log:
                 # loss1 = - tf.log(self.real)
-                loss1 = tf.maximum(- tf.log(self.other), - tf.log(self.real))
+                loss1 = tf.maximum(0.0, tf.log(self.other) - tf.log(self.real))
             else:
                 # if targetted, optimize for making the other class (real) most likely
                 loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)
@@ -183,8 +184,8 @@ class BlackBoxL2:
         self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
 
         # upper and lower bounds for the modifier
-        self.modifier_up = np.zeros(var_size)
-        self.modifier_down = np.zeros(var_size)
+        self.modifier_up = np.zeros(var_size, dtype = np.float32)
+        self.modifier_down = np.zeros(var_size, dtype = np.float32)
 
         # random permutation for coordinate update
         self.perm = np.random.permutation(var_size)
@@ -200,6 +201,10 @@ class BlackBoxL2:
         self.grad = np.zeros(batch_size, dtype = np.float32)
         # for testing
         self.grad_op = tf.gradients(self.loss, self.modifier)
+        # compile numba function
+        self.coordinate_ADAM_numba = jit(coordinate_ADAM, nopython = True)
+        self.coordinate_ADAM_numba.recompile()
+        print(self.coordinate_ADAM_numba.inspect_llvm())
 
     def fake_blackbox_optimizer(self):
         true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
@@ -231,9 +236,9 @@ class BlackBoxL2:
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
         # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
-        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
-        # indice = self.var_list[var_indice]
-        indice = self.var_list
+        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        indice = self.var_list[var_indice]
+        # indice = self.var_list
         # regenerate the permutations if we run out
         # if self.perm_index + self.batch_size >= var_size:
         #     self.perm = np.random.permutation(var_size)
@@ -244,14 +249,15 @@ class BlackBoxL2:
             var[i * 2 + 1].reshape(-1)[indice[i]] += 0.001
             var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.001
         losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
-        t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
-        self.grad = t_grad[0].reshape(-1)
-        coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
+        # self.grad = t_grad[0].reshape(-1)
+        self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         med = np.sort(np.absolute(self.grad))[-10]
         ns = self.model.image_size
         nc = self.model.num_channels
         self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
+        # base_prob = 1.0 / var_size * 100.0 * max(0.01, 1.0 / (iteration/10 + 1))
         base_prob = 1.0 / var_size * 1.0
         def get_coo(c, y, x):
             return c * (ns * ns) + y * ns + x
@@ -360,6 +366,9 @@ class BlackBoxL2:
         CONST = self.initial_const
         upper_bound = 1e10
 
+        # convert img to float32 to avoid numba error
+        img = img.astype(np.float32)
+
         # set the upper and lower bounds for the modifier
         self.modifier_up = 0.5 - img.reshape(-1)
         self.modifier_down = -0.5 - img.reshape(-1)
@@ -391,12 +400,26 @@ class BlackBoxL2:
             # use the model left by last constant change
             
             prev = 1e6
+            train_timer = 0.0
+            last_loss1 = 1.0
+            # reset ADAM status
+            self.mt.fill(0.0)
+            self.vt.fill(0.0)
+            self.adam_epoch.fill(1)
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//10) == 0:
-                    print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
+                if iteration%(self.MAX_ITERATIONS//100) == 0:
+                    # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
+                    loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
+                    print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
+                    if loss1 == 0.0 and last_loss1 != 0.0:
+                        self.mt.fill(0.0)
+                        self.vt.fill(0.0)
+                        self.adam_epoch.fill(1)
+                    last_loss1 = loss1
 
+                attack_begin_time = time.time()
                 # perform the attack 
                 # l, l2, score, nimg = self.fake_blackbox_optimizer()
                 l, l2, score, nimg = self.blackbox_optimizer(iteration)
@@ -418,6 +441,8 @@ class BlackBoxL2:
                     o_bestl2 = l2
                     o_bestscore = np.argmax(score)
                     o_bestattack = nimg
+
+                train_timer += time.time() - attack_begin_time
 
             # adjust the constant as needed
             if compare(bestscore, np.argmax(lab)) and bestscore != -1:

@@ -8,6 +8,7 @@
 import sys
 import tensorflow as tf
 import numpy as np
+import time
 
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
@@ -15,7 +16,7 @@ ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.55     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.25     # the initial constant c to pick as a first guess
 
 class CarliniL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
@@ -93,8 +94,9 @@ class CarliniL2:
 
         if self.TARGETED:
             if use_log:
-                loss1 = tf.maximum(- tf.log(self.other), - tf.log(self.real))
+                # loss1 = tf.maximum(- tf.log(self.other), - tf.log(self.real))
                 # loss1 = - tf.log(self.real)
+                loss1 = tf.maximum(0.0, tf.log(self.other) - tf.log(self.real))
             else:
                 # if targetted, optimize for making the other class most likely
                 loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)
@@ -116,7 +118,7 @@ class CarliniL2:
         # optimizer = tf.train.MomentumOptimizer(self.LEARNING_RATE, 0.99)
         # optimizer = tf.train.RMSPropOptimizer(self.LEARNING_RATE)
         # optimizer = tf.train.AdadeltaOptimizer(self.LEARNING_RATE)
-        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE, 0.9, 0.999)
+        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
         self.train = optimizer.minimize(self.loss, var_list=[self.modifier])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
@@ -193,15 +195,20 @@ class CarliniL2:
                                        self.assign_const: CONST})
             
             prev = 1e6
+            train_timer = 0.0
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//10) == 0:
-                    print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
+                    # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
                     # grad = self.sess.run(self.grad_op)
                     # old_modifier = self.sess.run(self.modifier)
                     # np.save('white_iter_{}'.format(iteration), modifier)
+                    loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2))
+                    print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss, real[0], other[0], loss1, loss2))
+
                     
 
+                attack_begin_time = time.time()
                 # perform the attack 
                 _, l, l2s, scores, nimg = self.sess.run([self.train, self.loss, 
                                                          self.l2dist, self.output, 
@@ -215,6 +222,7 @@ class CarliniL2:
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
                     if l > prev*.9999:
+                        print("Early stopping because there is no improvement")
                         break
                     prev = l
 
@@ -227,6 +235,8 @@ class CarliniL2:
                         o_bestl2[e] = l2
                         o_bestscore[e] = np.argmax(sc)
                         o_bestattack[e] = ii
+
+                train_timer += time.time() - attack_begin_time
 
             # adjust the constant as needed
             for e in range(batch_size):

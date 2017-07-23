@@ -78,12 +78,12 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
-        data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=28*28, max_iterations=10, confidence=0, use_log=use_log)
+        # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
+        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        attack = BlackBoxL2(sess, model, batch_size=256, max_iterations=1000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=3, inception=False)
+                                        start=6, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
