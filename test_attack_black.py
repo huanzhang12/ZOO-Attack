@@ -58,13 +58,13 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
             else:
                 seq = range(data.test_labels.shape[1])
 
+            print ('image label:', np.argmax(data.test_labels[start+i]))
             for j in seq:
                 # skip the original image label
                 if (j == np.argmax(data.test_labels[start+i])) and (inception == False):
                     continue
                 inputs.append(data.test_data[start+i])
                 targets.append(np.eye(data.test_labels.shape[1])[j])
-                print(targets)
         else:
             inputs.append(data.test_data[start+i])
             targets.append(data.test_labels[start+i])
@@ -79,11 +79,12 @@ if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        data, model = ImageNet(), InceptionModel(sess, use_log)
         attack = BlackBoxL2(sess, model, batch_size=256, max_iterations=1000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=6, inception=False)
+                                        start=1, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
@@ -98,7 +99,7 @@ if __name__ == "__main__":
         show(adv, "adversarial.png")
         show(adv - inputs[0], "diff.png")
         
-        print("Valid Classification:", model.model.predict(inputs[0].reshape((1,) + adv.shape)))
-        print("Adversarial Classification:", model.model.predict(adv.reshape((1,) + adv.shape)))
+        print("Valid Classification:", np.argsort(model.model.predict(inputs[0].reshape((1,) + adv.shape)))[-1:-6:-1])
+        print("Adversarial Classification:", np.argsort(model.model.predict(adv.reshape((1,) + adv.shape)))[-1:-6:-1])
 
         print("Total distortion:", np.sum((adv-inputs[0])**2)**.5)

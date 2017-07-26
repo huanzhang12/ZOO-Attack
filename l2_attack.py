@@ -16,7 +16,7 @@ ABORT_EARLY = True       # if we stop improving, abort gradient descent early
 LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.25     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.05     # the initial constant c to pick as a first guess
 
 class CarliniL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
@@ -198,7 +198,7 @@ class CarliniL2:
             train_timer = 0.0
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//10) == 0:
+                if iteration%(self.MAX_ITERATIONS//100) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
                     # grad = self.sess.run(self.grad_op)
                     # old_modifier = self.sess.run(self.modifier)

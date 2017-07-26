@@ -14,11 +14,11 @@ import time
 
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
-ABORT_EARLY = True       # if we stop improving, abort gradient descent early
-LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
+ABORT_EARLY = False      # if we stop improving, abort gradient descent early
+LEARNING_RATE = 1e-3     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.25     # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.05     # the initial constant c to pick as a first guess
 
 # @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
@@ -194,9 +194,10 @@ class BlackBoxL2:
         # ADAM status
         self.mt = np.zeros(var_size, dtype = np.float32)
         self.vt = np.zeros(var_size, dtype = np.float32)
-        self.beta1 = 0.9
-        self.beta2 = 0.999
+        self.beta1 = 0.5
+        self.beta2 = 0.99
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
+        self.stage = 0
         # variables used during optimization process
         self.grad = np.zeros(batch_size, dtype = np.float32)
         # for testing
@@ -235,8 +236,10 @@ class BlackBoxL2:
         var_size = self.real_modifier.size
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
-        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
-        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        if self.stage == 0:
+            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        else:
+            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         indice = self.var_list[var_indice]
         # indice = self.var_list
         # regenerate the permutations if we run out
@@ -253,70 +256,72 @@ class BlackBoxL2:
         # self.grad = t_grad[0].reshape(-1)
         self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
-        med = np.sort(np.absolute(self.grad))[-10]
-        ns = self.model.image_size
-        nc = self.model.num_channels
-        self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
-        # base_prob = 1.0 / var_size * 100.0 * max(0.01, 1.0 / (iteration/10 + 1))
-        base_prob = 1.0 / var_size * 1.0
         def get_coo(c, y, x):
             return c * (ns * ns) + y * ns + x
-        for i in range(self.batch_size):
-            if self.grad[i] > med:
-                # this is an important pixel, increase the sample probability of nearby pixels
-                ind = indice[i]
-                # convert to 2D 
-                ind_c = ind // (ns * ns)
-                ind_xy = ind % (ns * ns)
-                ind_y = ind_xy // ns
-                ind_x = ind_xy % ns
-                # print(i, ind_c, ind_y, ind_x, self.grad[i])
-                cnt = 0
-                if ind_c != 0:
-                    self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x)] = base_prob
-                    cnt += 1
+        # if we are in the initial optimization phase, use a larger sample probability for points that has a large gradient neighbour
+        if self.stage == 0:
+            thresh = np.sort(np.absolute(self.grad))[- self.batch_size // 10 ]
+            ns = self.model.image_size
+            nc = self.model.num_channels
+            self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
+            # base_prob = 1.0 / var_size * 100.0 * max(0.01, 1.0 / (iteration/10 + 1))
+            base_prob = 1.0 / var_size * 10.0
+            for i in range(self.batch_size):
+                if self.grad[i] > thresh:
+                    # this is an important pixel, increase the sample probability of nearby pixels
+                    ind = indice[i]
+                    # convert to 2D 
+                    ind_c = ind // (ns * ns)
+                    ind_xy = ind % (ns * ns)
+                    ind_y = ind_xy // ns
+                    ind_x = ind_xy % ns
+                    # print(i, ind_c, ind_y, ind_x, self.grad[i])
+                    cnt = 0
+                    if ind_c != 0:
+                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x)] = base_prob
+                        cnt += 1
+                        if ind_x != 0:
+                            self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x - 1)] = base_prob
+                            cnt += 1
+                        if ind_x != ns - 1:
+                            self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x + 1)] = base_prob
+                            cnt += 1
+                        if ind_y != 0:
+                            self.sample_prob[get_coo(ind_c - 1, ind_y - 1, ind_x)] = base_prob
+                            cnt += 1
+                        if ind_y != ns - 1:
+                            self.sample_prob[get_coo(ind_c - 1, ind_y + 1, ind_x)] = base_prob
+                            cnt += 1
+                    if ind_c != nc - 1:
+                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x)] = base_prob
+                        cnt += 1
+                        if ind_x != 0:
+                            self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x - 1)] = base_prob
+                            cnt += 1
+                        if ind_x != ns - 1:
+                            self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x + 1)] = base_prob
+                            cnt += 1
+                        if ind_y != 0:
+                            self.sample_prob[get_coo(ind_c + 1, ind_y - 1, ind_x)] = base_prob
+                            cnt += 1
+                        if ind_y != ns - 1:
+                            self.sample_prob[get_coo(ind_c + 1, ind_y + 1, ind_x)] = base_prob
+                            cnt += 1
                     if ind_x != 0:
-                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x - 1)] = base_prob
+                        self.sample_prob[get_coo(ind_c, ind_y, ind_x - 1)] = base_prob
                         cnt += 1
                     if ind_x != ns - 1:
-                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x + 1)] = base_prob
+                        self.sample_prob[get_coo(ind_c, ind_y, ind_x + 1)] = base_prob
                         cnt += 1
                     if ind_y != 0:
-                        self.sample_prob[get_coo(ind_c - 1, ind_y - 1, ind_x)] = base_prob
+                        self.sample_prob[get_coo(ind_c, ind_y - 1, ind_x)] = base_prob
                         cnt += 1
                     if ind_y != ns - 1:
-                        self.sample_prob[get_coo(ind_c - 1, ind_y + 1, ind_x)] = base_prob
+                        self.sample_prob[get_coo(ind_c, ind_y + 1, ind_x)] = base_prob
                         cnt += 1
-                if ind_c != nc - 1:
-                    self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x)] = base_prob
-                    cnt += 1
-                    if ind_x != 0:
-                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x - 1)] = base_prob
-                        cnt += 1
-                    if ind_x != ns - 1:
-                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x + 1)] = base_prob
-                        cnt += 1
-                    if ind_y != 0:
-                        self.sample_prob[get_coo(ind_c + 1, ind_y - 1, ind_x)] = base_prob
-                        cnt += 1
-                    if ind_y != ns - 1:
-                        self.sample_prob[get_coo(ind_c + 1, ind_y + 1, ind_x)] = base_prob
-                        cnt += 1
-                if ind_x != 0:
-                    self.sample_prob[get_coo(ind_c, ind_y, ind_x - 1)] = base_prob
-                    cnt += 1
-                if ind_x != ns - 1:
-                    self.sample_prob[get_coo(ind_c, ind_y, ind_x + 1)] = base_prob
-                    cnt += 1
-                if ind_y != 0:
-                    self.sample_prob[get_coo(ind_c, ind_y - 1, ind_x)] = base_prob
-                    cnt += 1
-                if ind_y != ns - 1:
-                    self.sample_prob[get_coo(ind_c, ind_y + 1, ind_x)] = base_prob
-                    cnt += 1
-                # self.sample_prob[indice] /= (cnt / 2)
-        # renormalize
-        self.sample_prob /= np.sum(self.sample_prob)
+                    # self.sample_prob[indice] /= (cnt / 2)
+            # renormalize
+            self.sample_prob /= np.sum(self.sample_prob)
 
         # if the gradient is too small, do not optimize on this variable
         # self.var_list = np.delete(self.var_list, indice[np.abs(self.grad) < 5e-3])
@@ -406,6 +411,7 @@ class BlackBoxL2:
             self.mt.fill(0.0)
             self.vt.fill(0.0)
             self.adam_epoch.fill(1)
+            self.stage = 0
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//100) == 0:
@@ -417,6 +423,8 @@ class BlackBoxL2:
                         self.mt.fill(0.0)
                         self.vt.fill(0.0)
                         self.adam_epoch.fill(1)
+                        # we have reached the fine tunning point
+                        self.stage = 1
                     last_loss1 = loss1
 
                 attack_begin_time = time.time()

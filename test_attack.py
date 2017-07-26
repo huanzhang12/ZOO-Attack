@@ -57,13 +57,13 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
             else:
                 seq = range(data.test_labels.shape[1])
 
+            print ('image label:', np.argmax(data.test_labels[start+i]))
             for j in seq:
                 # skip the original image label
                 if (j == np.argmax(data.test_labels[start+i])) and (inception == False):
                     continue
                 inputs.append(data.test_data[start+i])
                 targets.append(np.eye(data.test_labels.shape[1])[j])
-                print(targets)
         else:
             inputs.append(data.test_data[start+i])
             targets.append(data.test_labels[start+i])
@@ -76,15 +76,19 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
 
 if __name__ == "__main__":
     with tf.Session() as sess:
-        use_log = True
+        use_log = False
+        print('Loading model...')
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
         data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
         # data, model = ImageNet(), InceptionModel(sess, use_log)
+        print('Done...')
         attack = CarliniL2(sess, model, batch_size=1, max_iterations=1000, confidence=0, use_log=use_log)
 
+        print('Generate data')
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=6, inception=False)
+                                        start=1, inception=False)
+        print('Done...')
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
@@ -96,11 +100,13 @@ if __name__ == "__main__":
         for i in range(len(adv)):
             print("Valid:")
             show(inputs[i], "original_{}.png".format(i))
-            print("Classification:", model.model.predict(inputs[i:i+1]))
+            print("Classification:", np.argsort(model.model.predict(inputs[i:i+1]))[-1:-6:-1])
+            print(targets)
             print("Adversarial:")
             show(adv[i], "adversarial_{}.png".format(i))
+            show(adv[i] - inputs[i], "attack_diff.png")
             
-            print("Classification:", model.model.predict(adv[i:i+1]))
+            print("Classification:", np.argsort(model.model.predict(adv[i:i+1]))[-1:-6:-1])
 
             print("Total distortion:", np.sum((adv[i]-inputs[i])**2)**.5)
 

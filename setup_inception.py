@@ -42,6 +42,7 @@ from __future__ import print_function
 import os.path
 import re
 import sys
+import random
 import tarfile
 import scipy.misc
 
@@ -198,24 +199,63 @@ def run_inference_on_image(image):
       score = predictions[node_id]
       print('%s (score = %.5f)' % (human_string, score))
 
+class InceptionModelPrediction:
+  def __init__(self, sess, use_log = False):
+    self.sess = sess
+    self.use_log = use_log
+  def predict(self, dat):
+    with tf.Session() as sess:
+      img = tf.placeholder(tf.float32, (299,299,3))
+      dat = np.squeeze(dat)
+      scaled = (0.5 + dat) * 255
+      if self.use_log:
+        output_name = 'softmax:0'
+      else:
+        output_name = 'softmax/logits:0'
+      softmax_tensor = tf.import_graph_def(
+              sess.graph.as_graph_def(),
+              input_map={'Cast:0': img},
+              return_elements=[output_name])
+      predictions = sess.run(softmax_tensor,
+                             {img: scaled})
+      predictions = np.squeeze(predictions)
+      return predictions
+      # Creates node ID --> English string lookup.
+      node_lookup = NodeLookup()
+      top_k = predictions.argsort()#[-FLAGS.num_top_predictions:][::-1]
+      for node_id in top_k:
+        print('id',node_id)
+        human_string = node_lookup.id_to_string(node_id)
+        score = predictions[node_id]
+        print('%s (score = %.5f)' % (human_string, score))
+      return top_k[-1]
+
+
 CREATED_GRAPH = False
 class InceptionModel:
   image_size = 299
   num_labels = 1008
   num_channels = 3
-  def __init__(self, sess):
+  def __init__(self, sess, use_log = False):
     global CREATED_GRAPH
     self.sess = sess
+    self.use_log = use_log
     if not CREATED_GRAPH:
       create_graph()
       CREATED_GRAPH = True
+    self.model = InceptionModelPrediction(sess, use_log)
 
   def predict(self, img):
-    scaled = (0.5+tf.reshape(img,((299,299,3))))*255
+    if self.use_log:
+      output_name = 'softmax:0'
+    else:
+      output_name = 'softmax/logits:0'
+    # scaled = (0.5+tf.reshape(img,((299,299,3))))*255
+    scaled = (0.5+img)*255
     softmax_tensor = tf.import_graph_def(
       self.sess.graph.as_graph_def(),
       input_map={'Cast:0': scaled},
-      return_elements=['softmax/logits:0'])
+      return_elements=[output_name])
     return softmax_tensor[0]
   
 
@@ -242,7 +282,16 @@ def main(_):
   maybe_download_and_extract()
   image = (FLAGS.image_file if FLAGS.image_file else
            os.path.join(FLAGS.model_dir, 'cropped_panda.jpg'))
-  run_inference_on_image(image)
+  image = "/home/huan/projects/adversarial/nn_robust_attacks/original_0.png"
+  # run_inference_on_image(image)
+  create_graph()
+  with tf.Session() as sess:
+    dat = np.array(scipy.misc.imresize(scipy.misc.imread(image),(299,299)), dtype = np.float32)
+    dat /= 255.0
+    dat -= 0.5
+    print(dat)
+    model = InceptionModelPrediction(sess, True)
+    print(model.predict(dat))
 
 
 def readimg(ff):
@@ -256,7 +305,10 @@ class ImageNet:
   def __init__(self):
     from multiprocessing import Pool
     pool = Pool(8)
-    r = pool.map(readimg, os.listdir("../imagenetdata/imgs/")[:200])
+    file_list = os.listdir("../imagenetdata/imgs/")
+    random.seed(1216)
+    random.shuffle(file_list)
+    r = pool.map(readimg, file_list[:200])
     r = [x for x in r if x != None]
     test_data, test_labels = zip(*r)
     self.test_data = np.array(test_data)
