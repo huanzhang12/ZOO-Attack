@@ -81,7 +81,7 @@ if __name__ == "__main__":
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
         data, model = ImageNet(), InceptionModel(sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=256, max_iterations=1000, confidence=0, use_log=use_log)
+        attack = BlackBoxL2(sess, model, batch_size=64, max_iterations=1000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
                                         start=1, inception=False)

@@ -15,10 +15,10 @@ import time
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = False      # if we stop improving, abort gradient descent early
-LEARNING_RATE = 1e-3     # larger values converge faster to less accurate results
+LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.05     # the initial constant c to pick as a first guess
+INITIAL_CONST = 1.0      # the initial constant c to pick as a first guess
 
 # @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
@@ -55,7 +55,7 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = False):
+                 use_log = False, use_tanh = True):
         """
         The L_2 optimized attack. 
 
@@ -194,8 +194,10 @@ class BlackBoxL2:
         # ADAM status
         self.mt = np.zeros(var_size, dtype = np.float32)
         self.vt = np.zeros(var_size, dtype = np.float32)
-        self.beta1 = 0.5
-        self.beta2 = 0.99
+        # self.beta1 = 0.5
+        # self.beta2 = 0.99
+        self.beta1 = 0.9
+        self.beta2 = 0.999
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
         self.stage = 0
         # variables used during optimization process
@@ -265,7 +267,7 @@ class BlackBoxL2:
             nc = self.model.num_channels
             self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
             # base_prob = 1.0 / var_size * 100.0 * max(0.01, 1.0 / (iteration/10 + 1))
-            base_prob = 1.0 / var_size * 10.0
+            base_prob = 1.0 / var_size * 1.0
             for i in range(self.batch_size):
                 if self.grad[i] > thresh:
                     # this is an important pixel, increase the sample probability of nearby pixels
@@ -414,15 +416,15 @@ class BlackBoxL2:
             self.stage = 0
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//100) == 0:
+                if iteration%(self.MAX_ITERATIONS//1000) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
                     print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
                     if loss1 == 0.0 and last_loss1 != 0.0:
-                        self.mt.fill(0.0)
-                        self.vt.fill(0.0)
-                        self.adam_epoch.fill(1)
+                        # self.mt.fill(0.0)
+                        # self.vt.fill(0.0)
+                        # self.adam_epoch.fill(1)
                         # we have reached the fine tunning point
                         self.stage = 1
                     last_loss1 = loss1

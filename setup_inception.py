@@ -142,7 +142,8 @@ def create_graph():
   """Creates a graph from saved GraphDef file and returns a saver."""
   # Creates graph from saved graph_def.pb.
   with tf.gfile.FastGFile(os.path.join(
-      FLAGS.model_dir, 'classify_image_graph_def.pb'), 'rb') as f:
+    #  FLAGS.model_dir, 'classify_image_graph_def.pb'), 'rb') as f:
+      FLAGS.model_dir, 'frozen_inception_v3.pb'), 'rb') as f:
     graph_def = tf.GraphDef()
     graph_def.ParseFromString(f.read())
     #for line in repr(graph_def).split("\n"):
@@ -152,7 +153,7 @@ def create_graph():
 
 
 def run_inference_on_image(image):
-  """Runs inference on an image.
+  """Runs inference on an image. (Not updated, not working for inception v3 20160828)
 
   Args:
     image: Image file name.
@@ -205,16 +206,18 @@ class InceptionModelPrediction:
     self.use_log = use_log
   def predict(self, dat):
     with tf.Session() as sess:
-      img = tf.placeholder(tf.float32, (299,299,3))
+      img = tf.placeholder(tf.float32, (None, 299,299,3))
       dat = np.squeeze(dat)
-      scaled = (0.5 + dat) * 255
+      # scaled = (0.5 + dat) * 255
+      scaled = dat.reshape((1,) + dat.shape)
+      print(scaled.shape)
       if self.use_log:
-        output_name = 'softmax:0'
+        output_name = 'InceptionV3/Predictions/Softmax:0'
       else:
-        output_name = 'softmax/logits:0'
+        output_name = 'InceptionV3/Predictions/Reshape:0'
       softmax_tensor = tf.import_graph_def(
               sess.graph.as_graph_def(),
-              input_map={'Cast:0': img},
+              input_map={'input:0': img},
               return_elements=[output_name])
       predictions = sess.run(softmax_tensor,
                              {img: scaled})
@@ -234,7 +237,7 @@ class InceptionModelPrediction:
 CREATED_GRAPH = False
 class InceptionModel:
   image_size = 299
-  num_labels = 1008
+  num_labels = 1001
   num_channels = 3
   def __init__(self, sess, use_log = False):
     global CREATED_GRAPH
@@ -247,14 +250,14 @@ class InceptionModel:
 
   def predict(self, img):
     if self.use_log:
-      output_name = 'softmax:0'
+      output_name = 'InceptionV3/Predictions/Softmax:0'
     else:
-      output_name = 'softmax/logits:0'
+      output_name = 'InceptionV3/Predictions/Reshape:0'
     # scaled = (0.5+tf.reshape(img,((299,299,3))))*255
-    scaled = (0.5+img)*255
+    # scaled = (0.5+img)*255
     softmax_tensor = tf.import_graph_def(
       self.sess.graph.as_graph_def(),
-      input_map={'Cast:0': scaled},
+      input_map={'input:0': img},
       return_elements=[output_name])
     return softmax_tensor[0]
   
@@ -282,16 +285,26 @@ def main(_):
   maybe_download_and_extract()
   image = (FLAGS.image_file if FLAGS.image_file else
            os.path.join(FLAGS.model_dir, 'cropped_panda.jpg'))
-  image = "/home/huan/projects/adversarial/nn_robust_attacks/original_0.png"
+  # image = "/home/huan/projects/adversarial/nn_robust_attacks/original_0.png"
+  image = "/home/huan/projects/adversarial/imagenetdata/imgs/598.00032612.jpg"
+  image = "/home/huan/projects/adversarial/imagenetdata/imgs/49.00000541.jpg"
   # run_inference_on_image(image)
   create_graph()
   with tf.Session() as sess:
     dat = np.array(scipy.misc.imresize(scipy.misc.imread(image),(299,299)), dtype = np.float32)
     dat /= 255.0
     dat -= 0.5
-    print(dat)
+    # print(dat)
     model = InceptionModelPrediction(sess, True)
-    print(model.predict(dat))
+    predictions = model.predict(dat)
+    # Creates node ID --> English string lookup.
+    node_lookup = NodeLookup()
+    top_k = predictions.argsort()#[-FLAGS.num_top_predictions:][::-1]
+    for node_id in top_k:
+      print('id',node_id)
+      human_string = node_lookup.id_to_string(node_id)
+      score = predictions[node_id]
+      print('%s (score = %.5f)' % (human_string, score))
 
 
 def readimg(ff):
@@ -312,7 +325,7 @@ class ImageNet:
     r = [x for x in r if x != None]
     test_data, test_labels = zip(*r)
     self.test_data = np.array(test_data)
-    self.test_labels = np.zeros((len(test_labels), 1008))
+    self.test_labels = np.zeros((len(test_labels), 1001))
     self.test_labels[np.arange(len(test_labels)), test_labels] = 1
 
   
