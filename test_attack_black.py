@@ -58,7 +58,7 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
             else:
                 seq = range(data.test_labels.shape[1])
 
-            print ('image label:', np.argmax(data.test_labels[start+i]))
+            # print ('image label:', np.argmax(data.test_labels[start+i]))
             for j in seq:
                 # skip the original image label
                 if (j == np.argmax(data.test_labels[start+i])) and (inception == False):
@@ -81,10 +81,10 @@ if __name__ == "__main__":
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
         data, model = ImageNet(), InceptionModel(sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=64, max_iterations=1000, confidence=0, use_log=use_log)
+        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=100, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=1, inception=False)
+                                        start=6, inception=False)
         inputs = inputs[1:2]
         targets = targets[1:2]
         timestart = time.time()
