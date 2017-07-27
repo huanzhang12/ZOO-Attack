@@ -15,15 +15,16 @@ import time
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = False      # if we stop improving, abort gradient descent early
-LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
+LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 0.5      # the initial constant c to pick as a first guess
 
 # @jit(nopython=True)
 def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
+    # indice = np.array(range(0, 3*299*299), dtype = np.int32)
     for i in range(batch_size):
-        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
+        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.0002 
     # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
     # true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
     # grad = true_grads[0].reshape(-1)[indice]
@@ -46,6 +47,8 @@ def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modif
     # set it back to [-0.5, +0.5] region
     if proj:
         old_val = np.maximum(np.minimum(old_val, up[indice]), down[indice])
+    # print(grad)
+    # print(old_val - m[indice])
     m[indice] = old_val
     adam_epoch[indice] = epoch + 1
 
@@ -54,11 +57,11 @@ def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, re
         return np.piecewise(x, [x < 0, x >= 0], [-1, 1])
     cur_loss = losses[0]
     for i in range(batch_size):
-        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
-        hess[i] = (losses[i*2+1] - 2 * cur_loss + losses[i*2+2]) / (0.002 * 0.002)
+        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.0002 
+        hess[i] = (losses[i*2+1] - 2 * cur_loss + losses[i*2+2]) / (0.0001 * 0.0001)
     # print("New epoch:")
-    # print(grad)
-    # print(hess)
+    # print('grad', grad)
+    # print('hess', hess)
     # hess[hess < 0] = 1.0
     # hess[np.abs(hess) < 0.1] = sign(hess[np.abs(hess) < 0.1]) * 0.1
     hess[hess < 0] = 1.0
@@ -70,6 +73,7 @@ def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, re
     # set it back to [-0.5, +0.5] region
     if proj:
         old_val = np.maximum(np.minimum(old_val, up[indice]), down[indice])
+    # print('delta', old_val - m[indice])
     m[indice] = old_val
     # print(m[indice])
 
@@ -77,8 +81,8 @@ def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, re
 def coordinate_Newton_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
     cur_loss = losses[0]
     for i in range(batch_size):
-        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.002 
-        hess[i] = (losses[i*2+1] - 2 * cur_loss + losses[i*2+2]) / (0.002 * 0.002)
+        grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.0002 
+        hess[i] = (losses[i*2+1] - 2 * cur_loss + losses[i*2+2]) / (0.0001 * 0.0001)
     # print("New epoch:")
     # print(grad)
     # print(hess)
@@ -88,7 +92,7 @@ def coordinate_Newton_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_ar
     # negative hessian, using ADAM
     adam_indice = (hess < 0)
     # print(adam_indice)
-    print(sum(hess_indice), sum(adam_indice))
+    # print(sum(hess_indice), sum(adam_indice))
     hess[hess < 0] = 1.0
     hess[hess < 0.1] = 0.1
     # hess[np.abs(hess) < 0.1] = sign(hess[np.abs(hess) < 0.1]) * 0.1
@@ -112,8 +116,8 @@ def coordinate_Newton_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_ar
     epoch = adam_epoch[indice]
     corr = (np.sqrt(1 - np.power(beta2,epoch[adam_indice]))) / (1 - np.power(beta1, epoch[adam_indice]))
     old_val = m[indice[adam_indice]] 
-    # old_val -= lr * corr * mt[adam_indice] / (np.sqrt(vt[adam_indice]) + 1e-8)
-    old_val -= lr * grad[adam_indice]
+    old_val -= lr * corr * mt[adam_indice] / (np.sqrt(vt[adam_indice]) + 1e-8)
+    # old_val -= lr * grad[adam_indice]
     # set it back to [-0.5, +0.5] region
     if proj:
         old_val = np.maximum(np.minimum(old_val, up[indice[adam_indice]]), down[indice[adam_indice]])
@@ -127,7 +131,7 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = False):
+                 use_log = False, use_tanh = True):
         """
         The L_2 optimized attack. 
 
@@ -164,6 +168,9 @@ class BlackBoxL2:
         self.CONFIDENCE = confidence
         self.initial_const = initial_const
         self.batch_size = batch_size
+        # set random seed
+        np.random.seed(1216)
+
         self.use_tanh = use_tanh
 
         self.repeat = binary_search_steps >= 10
@@ -176,9 +183,10 @@ class BlackBoxL2:
         # support multiple batches
         self.modifier = tf.placeholder(tf.float32, shape=shape)
         # the real variable, initialized to 0
-        # self.real_modifier = np.load('best.model.npy').reshape((1,) + single_shape)
+        # self.real_modifier = np.load('checkpoints/checkpoint6.npy').reshape((1,) + single_shape)
         self.real_modifier = np.zeros((1,) + single_shape, dtype=np.float32)
-
+        # self.real_modifier = np.random.randn(image_size * image_size * num_channels).astype(np.float32).reshape((1,) + single_shape)
+        # self.real_modifier /= np.linalg.norm(self.real_modifier) 
         # these are variables to be more efficient in sending data to tf
         # we only work on 1 image at once; the batch is for evaluation loss at different modifiers
         self.timg = tf.Variable(np.zeros(single_shape), dtype=tf.float32)
@@ -244,9 +252,6 @@ class BlackBoxL2:
         self.setup.append(self.timg.assign(self.assign_timg))
         self.setup.append(self.tlab.assign(self.assign_tlab))
         self.setup.append(self.const.assign(self.assign_const))
-
-        # set random seed
-        np.random.seed(1216)
 
         # prepare the list of all valid variables
         var_size = image_size * image_size * num_channels
@@ -324,15 +329,20 @@ class BlackBoxL2:
         # indice = self.perm[self.perm_index:self.perm_index + self.batch_size]
         # b[0] has the original modifier, b[1] has one index added 0.0001
         for i in range(self.batch_size):
-            var[i * 2 + 1].reshape(-1)[indice[i]] += 0.001
-            var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.001
+            var[i * 2 + 1].reshape(-1)[indice[i]] += 0.0001
+            var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.0001
         losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
+        # losses = self.sess.run(self.loss, feed_dict={self.modifier: var})
         # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
         # self.grad = t_grad[0].reshape(-1)
+        # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
         # self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
-        coordinate_Newton(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
-        # coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh, true_grads)
+        # coordinate_Newton(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
+        np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
         def get_coo(c, y, x):
             return c * (ns * ns) + y * ns + x
         # if we are in the initial optimization phase, use a larger sample probability for points that has a large gradient neighbour
@@ -352,7 +362,7 @@ class BlackBoxL2:
                     ind_c = ind // (ns * ns)
                     ind_xy = ind % (ns * ns)
                     ind_y = ind_xy // ns
-                    ind_x = ind_xy % ns
+                    Ind_x = ind_xy % ns
                     # print(i, ind_c, ind_y, ind_x, self.grad[i])
                     cnt = 0
                     if ind_c != 0:
@@ -409,6 +419,7 @@ class BlackBoxL2:
         #    var_size = self.real_modifier.size
         #    self.var_list = np.array(range(0, var_size))
         return losses[0], l2s[0], scores[0], nimgs[0]
+        # return losses[0]
 
     def attack(self, imgs, targets):
         """
@@ -492,7 +503,7 @@ class BlackBoxL2:
             self.stage = 1
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//100) == 0:
+                if iteration%(self.MAX_ITERATIONS//1000) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
                     print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss[0], real[0], other[0], loss1[0], loss2[0]))
@@ -509,6 +520,7 @@ class BlackBoxL2:
                 # perform the attack 
                 # l, l2, score, nimg = self.fake_blackbox_optimizer()
                 l, l2, score, nimg = self.blackbox_optimizer(iteration)
+                # l = self.blackbox_optimizer(iteration)
 
                 # check if we should abort search if we're getting nowhere.
                 if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:

@@ -79,9 +79,9 @@ if __name__ == "__main__":
     with tf.Session() as sess:
         use_log = True
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
-        # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
-        data, model = ImageNet(), InceptionModel(sess, use_log)
-        attack = BlackBoxL2(sess, model, batch_size=32, max_iterations=100, confidence=0, use_log=use_log)
+        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        # data, model = ImageNet(), InceptionModel(sess, use_log)
+        attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=5000, confidence=0, use_log=use_log)
 
         inputs, targets = generate_data(data, samples=1, targeted=True,
                                         start=6, inception=False)

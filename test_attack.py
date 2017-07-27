@@ -80,14 +80,14 @@ if __name__ == "__main__":
         print('Loading model...')
         # data, model =  MNIST(), MNISTModel("models/mnist", sess, use_log)
         # data, model =  MNIST(), MNISTModel("models/mnist-distilled-100", sess, use_log)
-        # data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
-        data, model = ImageNet(), InceptionModel(sess, use_log)
+        data, model = CIFAR(), CIFARModel("models/cifar", sess, use_log)
+        # data, model = ImageNet(), InceptionModel(sess, use_log)
         print('Done...')
         attack = CarliniL2(sess, model, batch_size=1, max_iterations=1000, confidence=0, use_log=use_log)
 
         print('Generate data')
         inputs, targets = generate_data(data, samples=1, targeted=True,
-                                        start=1, inception=False)
+                                        start=6, inception=False)
         print('Done...')
         inputs = inputs[1:2]
         targets = targets[1:2]
