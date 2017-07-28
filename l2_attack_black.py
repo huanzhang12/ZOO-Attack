@@ -15,7 +15,7 @@ import time
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = False      # if we stop improving, abort gradient descent early
-LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
+LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 0.5      # the initial constant c to pick as a first guess
@@ -168,6 +168,9 @@ class BlackBoxL2:
         self.CONFIDENCE = confidence
         self.initial_const = initial_const
         self.batch_size = batch_size
+        self.num_channels = num_channels
+        self.small_x = 32
+        self.small_y = 32
         # set random seed
         np.random.seed(1216)
 
@@ -176,15 +179,24 @@ class BlackBoxL2:
         self.repeat = binary_search_steps >= 10
 
         # each batch has a different modifier value (see below) to evaluate
+        # small_shape = (None,self.small_x,self.small_y,num_channels)
         shape = (None,image_size,image_size,num_channels)
         single_shape = (image_size, image_size, num_channels)
+        small_single_shape = (self.small_x, self.small_y, num_channels)
         
         # the variable we're going to optimize over
         # support multiple batches
-        self.modifier = tf.placeholder(tf.float32, shape=shape)
+        # support any size image, will be resized to model native size
+        self.modifier = tf.placeholder(tf.float32, shape=(None, None, None, None))
+        # scaled up image
+        self.scaled_modifier = tf.image.resize_images(self.modifier, [image_size, image_size])
+        # operator used for resizing image
+        self.resize_size = tf.placeholder(tf.int32)
+        self.resize_input = tf.placeholder(tf.float32, shape=(1, None, None, None))
+        self.resize_op = tf.image.resize_images(self.resize_input, [self.resize_size, self.resize_size])
         # the real variable, initialized to 0
         # self.real_modifier = np.load('checkpoints/checkpoint6.npy').reshape((1,) + single_shape)
-        self.real_modifier = np.zeros((1,) + single_shape, dtype=np.float32)
+        self.real_modifier = np.zeros((1,) + small_single_shape, dtype=np.float32)
         # self.real_modifier = np.random.randn(image_size * image_size * num_channels).astype(np.float32).reshape((1,) + single_shape)
         # self.real_modifier /= np.linalg.norm(self.real_modifier) 
         # these are variables to be more efficient in sending data to tf
@@ -201,9 +213,9 @@ class BlackBoxL2:
         # the resulting image, tanh'd to keep bounded from -0.5 to 0.5
         # broadcast self.timg to every dimension of modifier
         if use_tanh:
-            self.newimg = tf.tanh(self.modifier + self.timg)/2
+            self.newimg = tf.tanh(self.scaled_modifier + self.timg)/2
         else:
-            self.newimg = self.modifier + self.timg
+            self.newimg = self.scaled_modifier + self.timg
         
         # prediction BEFORE-SOFTMAX of the model
         # now we have output at #batch_size different modifiers
@@ -254,7 +266,7 @@ class BlackBoxL2:
         self.setup.append(self.const.assign(self.assign_const))
 
         # prepare the list of all valid variables
-        var_size = image_size * image_size * num_channels
+        var_size = self.small_x * self.small_y * num_channels
         self.use_var_len = var_size
         self.var_list = np.array(range(0, self.use_var_len), dtype = np.int32)
         self.used_var_list = np.zeros(var_size, dtype = np.int32)
@@ -286,11 +298,28 @@ class BlackBoxL2:
         self.coordinate_ADAM_numba = jit(coordinate_ADAM, nopython = True)
         self.coordinate_ADAM_numba.recompile()
         print(self.coordinate_ADAM_numba.inspect_llvm())
+        # np.set_printoptions(threshold=np.nan)
+
+    def resize_img(self, small_x, small_y):
+        self.small_x = small_x
+        self.small_y = small_y
+        small_single_shape = (self.small_x, self.small_y, self.num_channels)
+        # run the resize_op once to get the scaled image
+        self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size: self.small_x, self.resize_input: self.real_modifier})
+        # prepare the list of all valid variables
+        var_size = self.small_x * self.small_y * self.num_channels
+        self.use_var_len = var_size
+        self.var_list = np.array(range(0, self.use_var_len), dtype = np.int32)
+        # ADAM status
+        self.mt = np.zeros(var_size, dtype = np.float32)
+        self.vt = np.zeros(var_size, dtype = np.float32)
+        self.adam_epoch = np.ones(var_size, dtype = np.int32)
 
     def fake_blackbox_optimizer(self):
         true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
         # ADAM update
         grad = true_grads[0].reshape(-1)
+        # print(true_grads[0])
         epoch = self.adam_epoch[0]
         mt = self.beta1 * self.mt + (1 - self.beta1) * grad
         vt = self.beta2 * self.vt + (1 - self.beta2) * np.square(grad)
@@ -336,11 +365,11 @@ class BlackBoxL2:
         # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
         # self.grad = t_grad[0].reshape(-1)
         # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
-        # self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh, true_grads)
         # coordinate_Newton(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
-        coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
         def get_coo(c, y, x):
@@ -464,8 +493,9 @@ class BlackBoxL2:
         img = img.astype(np.float32)
 
         # set the upper and lower bounds for the modifier
-        self.modifier_up = 0.5 - img.reshape(-1)
-        self.modifier_down = -0.5 - img.reshape(-1)
+        if not self.use_tanh:
+            self.modifier_up = 0.5 - img.reshape(-1)
+            self.modifier_down = -0.5 - img.reshape(-1)
 
         # the best l2, score, and image attack
         o_bestl2 = 1e10
@@ -502,6 +532,12 @@ class BlackBoxL2:
             self.adam_epoch.fill(1)
             self.stage = 1
             for iteration in range(self.MAX_ITERATIONS):
+                if iteration == 1500:
+                    self.resize_img(64,64)
+                if iteration == 4500:
+                    self.resize_img(96,96)
+                if iteration == 9000:
+                    self.resize_img(128,128)
                 # print out the losses every 10%
                 if iteration%(self.MAX_ITERATIONS//1000) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
@@ -523,7 +559,8 @@ class BlackBoxL2:
                 # l = self.blackbox_optimizer(iteration)
 
                 # check if we should abort search if we're getting nowhere.
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
+                # if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
+                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//100) == 0:
                     if l > prev*.9999:
                         print("Early stopping because there is no improvement")
                         break
