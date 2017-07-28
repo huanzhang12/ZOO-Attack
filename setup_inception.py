@@ -318,7 +318,7 @@ class ImageNet:
   def __init__(self):
     from multiprocessing import Pool
     pool = Pool(8)
-    file_list = os.listdir("../imagenetdata/imgs/")
+    file_list = sorted(os.listdir("../imagenetdata/imgs/"))
     random.seed(1216)
     random.shuffle(file_list)
     r = pool.map(readimg, file_list[:200])
