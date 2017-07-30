@@ -170,7 +170,7 @@ def main(args):
             show(inputs, "{}/{}/{}_original_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv, "{}/{}/{}_adversarial_{}_.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv - inputs, "{}/{}/{}_diff_{}.png".format(args['save'], args['dataset'], img_no, suffix))
-            print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.3f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), l2_total / total_success))
+            print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.6f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), l2_total / total_success))
 
         # t = np.random.randn(28*28).reshape(1,28,28,1)
         # print(model.model.predict(t))
