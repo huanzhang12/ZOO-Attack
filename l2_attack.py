@@ -13,15 +13,15 @@ import time
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
 ABORT_EARLY = True       # if we stop improving, abort gradient descent early
-LEARNING_RATE = 1e-2     # larger values converge faster to less accurate results
+LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
-INITIAL_CONST = 0.5      # the initial constant c to pick as a first guess
+INITIAL_CONST = 0.01     # the initial constant c to pick as a first guess
 
 class CarliniL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
-                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
+                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
                  use_log = False):
@@ -55,6 +55,7 @@ class CarliniL2:
         self.TARGETED = targeted
         self.LEARNING_RATE = learning_rate
         self.MAX_ITERATIONS = max_iterations
+        self.print_every = print_every
         self.BINARY_SEARCH_STEPS = binary_search_steps
         self.ABORT_EARLY = abort_early
         self.CONFIDENCE = confidence
@@ -96,13 +97,14 @@ class CarliniL2:
             if use_log:
                 # loss1 = tf.maximum(- tf.log(self.other), - tf.log(self.real))
                 # loss1 = - tf.log(self.real)
-                loss1 = tf.maximum(0.0, tf.log(self.other) - tf.log(self.real))
+                loss1 = tf.maximum(0.0, tf.log(self.other + 1e-30) - tf.log(self.real + 1e-30))
             else:
                 # if targetted, optimize for making the other class most likely
                 loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)
         else:
             if use_log:
-                loss1 = tf.log(self.real)
+                # loss1 = tf.log(self.real)
+                loss1 = tf.maximum(0.0, tf.log(self.real + 1e-30) - tf.log(self.other + 1e-30))
             else:
             # if untargeted, optimize for making this class least likely.
                 loss1 = tf.maximum(0.0, self.real-self.other+self.CONFIDENCE)
@@ -174,9 +176,10 @@ class CarliniL2:
         o_bestl2 = [1e10]*batch_size
         o_bestscore = [-1]*batch_size
         o_bestattack = [np.zeros(imgs[0].shape)]*batch_size
+        o_best_const = [self.initial_const]*batch_size
         
         for outer_step in range(self.BINARY_SEARCH_STEPS):
-            print(o_bestl2)
+            print("current best l2", o_bestl2)
             # completely reset adam's internal state.
             self.sess.run(self.init)
             batch = imgs[:batch_size]
@@ -198,13 +201,13 @@ class CarliniL2:
             train_timer = 0.0
             for iteration in range(self.MAX_ITERATIONS):
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//1000) == 0:
+                if iteration%(self.MAX_ITERATIONS//self.print_every) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2)))
                     # grad = self.sess.run(self.grad_op)
                     # old_modifier = self.sess.run(self.modifier)
                     # np.save('white_iter_{}'.format(iteration), modifier)
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2))
-                    print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss, real[0], other[0], loss1, loss2))
+                    print("[STATS][L2] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss, real[0], other[0], loss1, loss2))
 
                     
 
@@ -220,7 +223,7 @@ class CarliniL2:
                 # print((old_modifier - new_modifier).reshape(-1))
 
                 # check if we should abort search if we're getting nowhere.
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
+                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//100) == 0:
                     if l > prev*.9999:
                         print("Early stopping because there is no improvement")
                         break
@@ -235,6 +238,7 @@ class CarliniL2:
                         o_bestl2[e] = l2
                         o_bestscore[e] = np.argmax(sc)
                         o_bestattack[e] = ii
+                        o_best_const[e] = CONST[e]
 
                 train_timer += time.time() - attack_begin_time
 
@@ -262,4 +266,4 @@ class CarliniL2:
 
         # return the best solution found
         o_bestl2 = np.array(o_bestl2)
-        return o_bestattack
+        return np.array(o_bestattack), o_best_const

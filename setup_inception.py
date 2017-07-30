@@ -204,34 +204,33 @@ class InceptionModelPrediction:
   def __init__(self, sess, use_log = False):
     self.sess = sess
     self.use_log = use_log
+    if self.use_log:
+      output_name = 'InceptionV3/Predictions/Softmax:0'
+    else:
+      output_name = 'InceptionV3/Predictions/Reshape:0'
+    self.img = tf.placeholder(tf.float32, (None, 299,299,3))
+    self.softmax_tensor = tf.import_graph_def(
+            sess.graph.as_graph_def(),
+            input_map={'input:0': self.img},
+            return_elements=[output_name])
   def predict(self, dat):
-    with tf.Session() as sess:
-      img = tf.placeholder(tf.float32, (None, 299,299,3))
-      dat = np.squeeze(dat)
-      # scaled = (0.5 + dat) * 255
-      scaled = dat.reshape((1,) + dat.shape)
-      print(scaled.shape)
-      if self.use_log:
-        output_name = 'InceptionV3/Predictions/Softmax:0'
-      else:
-        output_name = 'InceptionV3/Predictions/Reshape:0'
-      softmax_tensor = tf.import_graph_def(
-              sess.graph.as_graph_def(),
-              input_map={'input:0': img},
-              return_elements=[output_name])
-      predictions = sess.run(softmax_tensor,
-                             {img: scaled})
-      predictions = np.squeeze(predictions)
-      return predictions
-      # Creates node ID --> English string lookup.
-      node_lookup = NodeLookup()
-      top_k = predictions.argsort()#[-FLAGS.num_top_predictions:][::-1]
-      for node_id in top_k:
-        print('id',node_id)
-        human_string = node_lookup.id_to_string(node_id)
-        score = predictions[node_id]
-        print('%s (score = %.5f)' % (human_string, score))
-      return top_k[-1]
+    dat = np.squeeze(dat)
+    # scaled = (0.5 + dat) * 255
+    scaled = dat.reshape((1,) + dat.shape)
+    # print(scaled.shape)
+    predictions = self.sess.run(self.softmax_tensor,
+                         {self.img: scaled})
+    predictions = np.squeeze(predictions)
+    return predictions
+    # Creates node ID --> English string lookup.
+    node_lookup = NodeLookup()
+    top_k = predictions.argsort()#[-FLAGS.num_top_predictions:][::-1]
+    for node_id in top_k:
+      print('id',node_id)
+      human_string = node_lookup.id_to_string(node_id)
+      score = predictions[node_id]
+      print('%s (score = %.5f)' % (human_string, score))
+    return top_k[-1]
 
 
 CREATED_GRAPH = False
