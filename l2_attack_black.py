@@ -14,7 +14,7 @@ import time
 
 BINARY_SEARCH_STEPS = 1  # number of times to adjust the constant with binary search
 MAX_ITERATIONS = 10000   # number of iterations to perform gradient descent
-ABORT_EARLY = False      # if we stop improving, abort gradient descent early
+ABORT_EARLY = True      # if we stop improving, abort gradient descent early
 LEARNING_RATE = 2e-3     # larger values converge faster to less accurate results
 TARGETED = True          # should we target one specific class? or just be wrong?
 CONFIDENCE = 0           # how strong the adversarial example should be
@@ -128,10 +128,10 @@ def coordinate_Newton_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_ar
 class BlackBoxL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
-                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS,
+                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100, early_stop_iters = 0,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = True):
+                 use_log = False, use_tanh = True, use_resize = False):
         """
         The L_2 optimized attack. 
 
@@ -163,18 +163,24 @@ class BlackBoxL2:
         self.TARGETED = targeted
         self.LEARNING_RATE = learning_rate
         self.MAX_ITERATIONS = max_iterations
+        self.print_every = print_every
+        self.early_stop_iters = early_stop_iters if early_stop_iters != 0 else max_iterations // 10
+        print("early stop:", self.early_stop_iters)
         self.BINARY_SEARCH_STEPS = binary_search_steps
         self.ABORT_EARLY = abort_early
         self.CONFIDENCE = confidence
         self.initial_const = initial_const
         self.batch_size = batch_size
         self.num_channels = num_channels
-        self.small_x = 32
-        self.small_y = 32
-        # set random seed
-        np.random.seed(1216)
+        if use_resize:
+            self.small_x = 32
+            self.small_y = 32
+        else:
+            self.small_x = image_size
+            self.small_y = image_size
 
         self.use_tanh = use_tanh
+        self.use_resize = use_resize
 
         self.repeat = binary_search_steps >= 10
 
@@ -187,13 +193,19 @@ class BlackBoxL2:
         # the variable we're going to optimize over
         # support multiple batches
         # support any size image, will be resized to model native size
-        self.modifier = tf.placeholder(tf.float32, shape=(None, None, None, None))
-        # scaled up image
-        self.scaled_modifier = tf.image.resize_images(self.modifier, [image_size, image_size])
-        # operator used for resizing image
-        self.resize_size = tf.placeholder(tf.int32)
-        self.resize_input = tf.placeholder(tf.float32, shape=(1, None, None, None))
-        self.resize_op = tf.image.resize_images(self.resize_input, [self.resize_size, self.resize_size])
+        if self.use_resize:
+            self.modifier = tf.placeholder(tf.float32, shape=(None, None, None, None))
+            # scaled up image
+            self.scaled_modifier = tf.image.resize_images(self.modifier, [image_size, image_size])
+            # operator used for resizing image
+            self.resize_size_x = tf.placeholder(tf.int32)
+            self.resize_size_y = tf.placeholder(tf.int32)
+            self.resize_input = tf.placeholder(tf.float32, shape=(1, None, None, None))
+            self.resize_op = tf.image.resize_images(self.resize_input, [self.resize_size_x, self.resize_size_y])
+        else:
+            self.modifier = tf.placeholder(tf.float32, shape=(None, image_size, image_size, num_channels))
+            # no resize
+            self.scaled_modifier = self.modifier
         # the real variable, initialized to 0
         # self.real_modifier = np.load('checkpoints/checkpoint6.npy').reshape((1,) + single_shape)
         self.real_modifier = np.zeros((1,) + small_single_shape, dtype=np.float32)
@@ -243,13 +255,14 @@ class BlackBoxL2:
         if self.TARGETED:
             if use_log:
                 # loss1 = - tf.log(self.real)
-                loss1 = tf.maximum(0.0, tf.log(self.other) - tf.log(self.real))
+                loss1 = tf.maximum(0.0, tf.log(self.other + 1e-30) - tf.log(self.real + 1e-30))
             else:
                 # if targetted, optimize for making the other class (real) most likely
                 loss1 = tf.maximum(0.0, self.other-self.real+self.CONFIDENCE)
         else:
             if use_log:
-                loss1 = tf.log(self.real)
+                # loss1 = tf.log(self.real)
+                loss1 = tf.maximum(0.0, tf.log(self.real + 1e-30) - tf.log(self.other + 1e-30))
             else:
                 # if untargeted, optimize for making this class least likely.
                 loss1 = tf.maximum(0.0, self.real-self.other+self.CONFIDENCE)
@@ -283,12 +296,12 @@ class BlackBoxL2:
         # ADAM status
         self.mt = np.zeros(var_size, dtype = np.float32)
         self.vt = np.zeros(var_size, dtype = np.float32)
-        self.beta1 = 0.5
-        self.beta2 = 0.99
-        # self.beta1 = 0.9
-        # self.beta2 = 0.999
+        # self.beta1 = 0.8
+        # self.beta2 = 0.99
+        self.beta1 = 0.9
+        self.beta2 = 0.999
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
-        self.stage = 1
+        self.stage = 0
         # variables used during optimization process
         self.grad = np.zeros(batch_size, dtype = np.float32)
         self.hess = np.zeros(batch_size, dtype = np.float32)
@@ -305,7 +318,7 @@ class BlackBoxL2:
         self.small_y = small_y
         small_single_shape = (self.small_x, self.small_y, self.num_channels)
         # run the resize_op once to get the scaled image
-        self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size: self.small_x, self.resize_input: self.real_modifier})
+        self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size_x: self.small_x, self.resize_size_y: self.small_y, self.resize_input: self.real_modifier})
         # prepare the list of all valid variables
         var_size = self.small_x * self.small_y * self.num_channels
         self.use_var_len = var_size
@@ -316,7 +329,7 @@ class BlackBoxL2:
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
 
     def fake_blackbox_optimizer(self):
-        true_grads, losses, l2s, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
+        true_grads, losses, l2s, loss1, loss2, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.loss1, self.loss2, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
         # ADAM update
         grad = true_grads[0].reshape(-1)
         # print(true_grads[0])
@@ -336,7 +349,7 @@ class BlackBoxL2:
             m_proj = np.maximum(np.minimum(m, self.modifier_up), self.modifier_down)
             np.copyto(m, m_proj)
         self.adam_epoch[0] = epoch + 1
-        return losses[0], l2s[0], scores[0], nimgs[0]
+        return losses[0], l2s[0], loss1[0], loss2[0], scores[0], nimgs[0]
 
 
     def blackbox_optimizer(self, iteration):
@@ -345,10 +358,10 @@ class BlackBoxL2:
         var_size = self.real_modifier.size
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
-        if self.stage == 0:
-            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
-        else:
-            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        # if self.stage == 0:
+        #     var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        # else:
+        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         indice = self.var_list[var_indice]
         # indice = self.var_list
         # regenerate the permutations if we run out
@@ -360,7 +373,7 @@ class BlackBoxL2:
         for i in range(self.batch_size):
             var[i * 2 + 1].reshape(-1)[indice[i]] += 0.0001
             var[i * 2 + 2].reshape(-1)[indice[i]] -= 0.0001
-        losses, l2s, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.output, self.newimg], feed_dict={self.modifier: var})
+        losses, l2s, loss1, loss2, scores, nimgs = self.sess.run([self.loss, self.l2dist, self.loss1, self.loss2, self.output, self.newimg], feed_dict={self.modifier: var})
         # losses = self.sess.run(self.loss, feed_dict={self.modifier: var})
         # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
         # self.grad = t_grad[0].reshape(-1)
@@ -376,7 +389,7 @@ class BlackBoxL2:
             return c * (ns * ns) + y * ns + x
         # if we are in the initial optimization phase, use a larger sample probability for points that has a large gradient neighbour
         # if self.stage == 0:
-        if self.stage == 0:
+        if False:
             thresh = np.sort(np.absolute(self.grad))[- self.batch_size // 10 ]
             ns = self.model.image_size
             nc = self.model.num_channels
@@ -447,7 +460,7 @@ class BlackBoxL2:
         #    print("{} variables remained at last stage".format(self.var_list.size))
         #    var_size = self.real_modifier.size
         #    self.var_list = np.array(range(0, var_size))
-        return losses[0], l2s[0], scores[0], nimgs[0]
+        return losses[0], l2s[0], loss1[0], loss2[0], scores[0], nimgs[0]
         # return losses[0]
 
     def attack(self, imgs, targets):
@@ -462,11 +475,11 @@ class BlackBoxL2:
         # we can only run 1 image at a time, minibatches are used for gradient evaluation
         for i in range(0,len(imgs)):
             print('tick',i)
-            r.extend(self.attack_one(imgs[i], targets[i]))
+            r.extend(self.attack_batch(imgs[i], targets[i]))
         return np.array(r)
 
     # only accepts 1 image at a time. Batch is used for gradient evaluations at different points
-    def attack_one(self, img, lab):
+    def attack_batch(self, img, lab):
         """
         Run the attack on a batch of images and labels.
         """
@@ -480,6 +493,11 @@ class BlackBoxL2:
             else:
                 return x != y
 
+        # remove the extra batch dimension
+        if len(img.shape) == 4:
+            img = img[0]
+        if len(lab.shape) == 2:
+            lab = lab[0]
         # convert to tanh-space
         if self.use_tanh:
             img = np.arctanh(img*1.999999)
@@ -497,7 +515,11 @@ class BlackBoxL2:
             self.modifier_up = 0.5 - img.reshape(-1)
             self.modifier_down = -0.5 - img.reshape(-1)
 
+        # clear the modifier
+        self.real_modifier.fill(0.0)
+
         # the best l2, score, and image attack
+        o_best_const = CONST
         o_bestl2 = 1e10
         o_bestscore = -1
         o_bestattack = img
@@ -517,8 +539,6 @@ class BlackBoxL2:
                                        self.assign_tlab: lab,
                                        self.assign_const: CONST})
 
-            # clear the modifier
-            # self.real_modifier.fill(0.0)
             # use the current best model
             # np.copyto(self.real_modifier, o_bestattack - img)
             # use the model left by last constant change
@@ -526,41 +546,45 @@ class BlackBoxL2:
             prev = 1e6
             train_timer = 0.0
             last_loss1 = 1.0
+            self.real_modifier.fill(0.0)
             # reset ADAM status
             self.mt.fill(0.0)
             self.vt.fill(0.0)
             self.adam_epoch.fill(1)
-            self.stage = 1
+            self.stage = 0
             for iteration in range(self.MAX_ITERATIONS):
-                if iteration == 1500:
-                    self.resize_img(64,64)
-                if iteration == 4500:
-                    self.resize_img(96,96)
-                if iteration == 9000:
-                    self.resize_img(128,128)
+                if self.use_resize:
+                    if iteration == 1500:
+                        self.resize_img(64,64)
+                    if iteration == 4500:
+                        self.resize_img(96,96)
+                    if iteration == 9000:
+                        self.resize_img(128,128)
                 # print out the losses every 10%
-                if iteration%(self.MAX_ITERATIONS//1000) == 0:
+                if iteration%(self.print_every) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
-                    print("[STATS] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss[0], real[0], other[0], loss1[0], loss2[0]))
+                    print("[STATS] iter = {}, time = {:.3f}, size = {} loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
-                    if loss1 == 0.0 and last_loss1 != 0.0:
-                        # self.mt.fill(0.0)
-                        # self.vt.fill(0.0)
-                        # self.adam_epoch.fill(1)
-                        # we have reached the fine tunning point
-                        self.stage = 1
-                    last_loss1 = loss1
 
                 attack_begin_time = time.time()
                 # perform the attack 
                 # l, l2, score, nimg = self.fake_blackbox_optimizer()
-                l, l2, score, nimg = self.blackbox_optimizer(iteration)
+                l, l2, loss1, loss2, score, nimg = self.blackbox_optimizer(iteration)
                 # l = self.blackbox_optimizer(iteration)
+
+                # reset ADAM states when a valid example has been found
+                if loss1 == 0.0 and last_loss1 != 0.0 and self.stage == 0:
+                    # self.mt.fill(0.0)
+                    # self.vt.fill(0.0)
+                    # self.adam_epoch.fill(1)
+                    # we have reached the fine tunning point
+                    self.stage = 1
+                last_loss1 = loss1
 
                 # check if we should abort search if we're getting nowhere.
                 # if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//100) == 0:
+                if self.ABORT_EARLY and iteration % self.early_stop_iters == 0:
                     if l > prev*.9999:
                         print("Early stopping because there is no improvement")
                         break
@@ -576,6 +600,7 @@ class BlackBoxL2:
                     o_bestl2 = l2
                     o_bestscore = np.argmax(score)
                     o_bestattack = nimg
+                    o_best_const = CONST
 
                 train_timer += time.time() - attack_begin_time
 
@@ -599,5 +624,5 @@ class BlackBoxL2:
                 print('new constant: ', CONST)
 
         # return the best solution found
-        return o_bestattack
+        return o_bestattack, o_best_const
 

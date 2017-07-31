@@ -98,15 +98,15 @@ def main(args):
             data, model = ImageNet(), InceptionModel(sess, use_log)
         print('Done...')
         if args['numimg'] == 0:
-            args['numimg'] = len(data.validation_labels)
+            args['numimg'] = len(data.test_labels)
         print('Using', args['numimg'], 'test images')
         # load attack module
         if args['attack'] == "white":
             # batch size 1, optimize on 1 image at a time, rather than optimizing images jointly
-            attack = CarliniL2(sess, model, batch_size=1, max_iterations=args['maxiter'], print_every=args['print_every'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log)
+            attack = CarliniL2(sess, model, batch_size=1, max_iterations=args['maxiter'], print_every=args['print_every'], early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log)
         else:
             # batch size 128, optimize on 128 coordinates of a single image
-            attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=args['maxiter'], print_every=args['print_every'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], use_resize=args['use_resize'])
+            attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=args['maxiter'], print_every=args['print_every'], early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], use_resize=args['use_resize'])
 
         print('Generate data')
         all_inputs, all_targets, all_labels, all_true_ids = generate_data(data, samples=args['numimg'], targeted=not args['untargeted'],
@@ -118,15 +118,9 @@ def main(args):
         total_success = 0
         l2_total = 0.0
         for i in range(all_true_ids.size):
-            # white and black box requires different shapes
-            if args['attack'] == "white":
-                inputs = all_inputs[i:i+1]
-                targets = all_targets[i:i+1]
-                labels = all_labels[i:i+1]
-            else:
-                inputs = all_inputs[i]
-                targets = all_targets[i]
-                labels = all_labels[i]
+            inputs = all_inputs[i:i+1]
+            targets = all_targets[i:i+1]
+            labels = all_labels[i:i+1]
             print("true labels:", labels)
             print("target:", targets)
             # test if the image is correctly classified
@@ -143,7 +137,8 @@ def main(args):
             img_no += 1
             timestart = time.time()
             adv, const = attack.attack_batch(inputs, targets)
-            const = const[0]
+            if type(const) is list: 
+                const = const[0]
             if len(adv.shape) == 3:
                 adv = adv.reshape((1,) + adv.shape)
             timeend = time.time()
@@ -170,7 +165,7 @@ def main(args):
             show(inputs, "{}/{}/{}_original_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv, "{}/{}/{}_adversarial_{}_.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv - inputs, "{}/{}/{}_diff_{}.png".format(args['save'], args['dataset'], img_no, suffix))
-            print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.6f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), l2_total / total_success))
+            print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.6f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), 0 if total_success == 0 else l2_total / total_success))
 
         # t = np.random.randn(28*28).reshape(1,28,28,1)
         # print(model.model.predict(t))
@@ -183,7 +178,8 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--attack", choices=["white", "black"], default="white")
     parser.add_argument("-n", "--numimg", type=int, default=0)
     parser.add_argument("-i", "--maxiter", type=int, default=0, help = "set 0 to use default value")
-    parser.add_argument("-p", "--print_every", type=int, default=100, help = "print objs every x iterations")
+    parser.add_argument("-p", "--print_every", type=int, default=100, help = "print objs every PRINT_EVERY iterations")
+    parser.add_argument("-o", "--early_stop_iters", type=int, default=100, help = "print objs every EARLY_STOP_ITER iterations, 0 is maxiter//10")
     parser.add_argument("-f", "--firstimg", type=int, default=0)
     parser.add_argument("-b", "--binary_steps", type=int, default=0)
     parser.add_argument("-c", "--init_const", type=float, default=0.0)
@@ -203,8 +199,10 @@ if __name__ == "__main__":
         else:
             if args['dataset'] == "imagenet":
                 args['maxiter'] = 50000
+            elif args['dataset'] == "mnist":
+                args['maxiter'] = 3000
             else:
-                args['maxiter'] = 2000
+                args['maxiter'] = 1000
     if args['init_const'] == 0.0:
         if args['binary_steps'] != 0:
             args['init_const'] = 0.01

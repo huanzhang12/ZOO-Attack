@@ -21,7 +21,7 @@ INITIAL_CONST = 0.01     # the initial constant c to pick as a first guess
 class CarliniL2:
     def __init__(self, sess, model, batch_size=1, confidence = CONFIDENCE,
                  targeted = TARGETED, learning_rate = LEARNING_RATE,
-                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100,
+                 binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100, early_stop_iters = 0,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
                  use_log = False):
@@ -56,6 +56,8 @@ class CarliniL2:
         self.LEARNING_RATE = learning_rate
         self.MAX_ITERATIONS = max_iterations
         self.print_every = print_every
+        self.early_stop_iters = early_stop_iters if early_stop_iters != 0 else max_iterations // 10
+        print("early stop:", self.early_stop_iters)
         self.BINARY_SEARCH_STEPS = binary_search_steps
         self.ABORT_EARLY = abort_early
         self.CONFIDENCE = confidence
@@ -223,7 +225,7 @@ class CarliniL2:
                 # print((old_modifier - new_modifier).reshape(-1))
 
                 # check if we should abort search if we're getting nowhere.
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//100) == 0:
+                if self.ABORT_EARLY and iteration % self.early_stop_iters == 0:
                     if l > prev*.9999:
                         print("Early stopping because there is no improvement")
                         break
