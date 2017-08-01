@@ -565,6 +565,7 @@ class BlackBoxL2:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
                     print("[STATS] iter = {}, time = {:.3f}, size = {} loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
+                    sys.stdout.flush()
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
                 attack_begin_time = time.time()

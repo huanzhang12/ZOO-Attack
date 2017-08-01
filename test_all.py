@@ -6,6 +6,7 @@
 ## contained in the LICENCE file in this directory.
 
 import os
+import sys
 import tensorflow as tf
 import numpy as np
 import random
@@ -168,6 +169,7 @@ def main(args):
             show(adv, "{}/{}/{}_adversarial_{}_.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv - inputs, "{}/{}/{}_diff_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.6f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), 0 if total_success == 0 else l2_total / total_success))
+            sys.stdout.flush()
 
         # t = np.random.randn(28*28).reshape(1,28,28,1)
         # print(model.model.predict(t))

@@ -210,8 +210,7 @@ class CarliniL2:
                     # np.save('white_iter_{}'.format(iteration), modifier)
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2))
                     print("[STATS][L2] iter = {}, time = {:.3f}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, loss, real[0], other[0], loss1, loss2))
-
-                    
+                    sys.stdout.flush()
 
                 attack_begin_time = time.time()
                 # perform the attack 
