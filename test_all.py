@@ -8,6 +8,7 @@
 import os
 import tensorflow as tf
 import numpy as np
+import random
 import time
 
 from setup_cifar import CIFAR, CIFARModel
@@ -108,12 +109,13 @@ def main(args):
             # batch size 128, optimize on 128 coordinates of a single image
             attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=args['maxiter'], print_every=args['print_every'], early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], use_resize=args['use_resize'])
 
+        random.seed(args['seed'])
+        np.random.seed(args['seed'])
         print('Generate data')
         all_inputs, all_targets, all_labels, all_true_ids = generate_data(data, samples=args['numimg'], targeted=not args['untargeted'],
                                         start=args['firstimg'], inception=is_inception)
         print('Done...')
         os.system("mkdir -p {}/{}".format(args['save'], args['dataset']))
-
         img_no = 0
         total_success = 0
         l2_total = 0.0
@@ -225,6 +227,7 @@ if __name__ == "__main__":
         else:
             args['init_const'] = 0.5
     # setup random seed
+    random.seed(args['seed'])
     np.random.seed(args['seed'])
     print(args)
     main(args)
