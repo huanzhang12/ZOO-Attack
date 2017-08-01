@@ -6,6 +6,7 @@
 ## contained in the LICENCE file in this directory.
 
 import sys
+import os
 import tensorflow as tf
 import numpy as np
 from numba import jit
@@ -135,7 +136,7 @@ class BlackBoxL2:
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
                  use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False,
-                 solver = "adam"):
+                 solver = "adam", save_ckpts = False):
         """
         The L_2 optimized attack. 
 
@@ -185,6 +186,9 @@ class BlackBoxL2:
 
         self.use_tanh = use_tanh
         self.use_resize = use_resize
+        self.save_ckpts = save_ckpts
+        if save_ckpts:
+            os.system("mkdir -p checkpoints")
 
         self.repeat = binary_search_steps >= 10
 
@@ -402,7 +406,8 @@ class BlackBoxL2:
         # coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         self.solver(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
-        np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
+        if self.save_ckpts:
+            np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
         def get_coo(c, y, x):
             return c * (ns * ns) + y * ns + x
         # if we are in the initial optimization phase, use a larger sample probability for points that has a large gradient neighbour

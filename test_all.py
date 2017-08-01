@@ -115,7 +115,7 @@ def main(args):
                      early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], 
                      binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], 
                      use_resize=args['use_resize'], adam_beta1=args['adam_beta1'], adam_beta2=args['adam_beta2'], reset_adam_after_found=args['reset_adam'],
-                     solver=args['solver'])
+                     solver=args['solver'], save_ckpts=args['save_ckpts'])
 
         random.seed(args['seed'])
         np.random.seed(args['seed'])
@@ -208,6 +208,7 @@ if __name__ == "__main__":
     args['inception'] = False
     args['use_tanh'] = True
     args['use_resize'] = False
+    args['save_ckpts'] = False
     if args['maxiter'] == 0:
         if args['attack'] == "white":
             args['maxiter'] = 1000
@@ -230,6 +231,7 @@ if __name__ == "__main__":
         args['inception'] = True
         args['lr'] = 2e-3
         args['use_resize'] = True
+        args['save_ckpts'] = True
     # for mnist, using tanh causes gradient to vanish
     if args['dataset'] == "mnist":
         args['use_tanh'] = False
