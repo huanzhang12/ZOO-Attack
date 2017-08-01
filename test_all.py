@@ -105,10 +105,16 @@ def main(args):
         # load attack module
         if args['attack'] == "white":
             # batch size 1, optimize on 1 image at a time, rather than optimizing images jointly
-            attack = CarliniL2(sess, model, batch_size=1, max_iterations=args['maxiter'], print_every=args['print_every'], early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log)
+            attack = CarliniL2(sess, model, batch_size=1, max_iterations=args['maxiter'], print_every=args['print_every'], 
+                     early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], 
+                     binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log,
+                     adam_beta1=args['adam_beta1'], adam_beta2=args['adam_beta2'])
         else:
             # batch size 128, optimize on 128 coordinates of a single image
-            attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=args['maxiter'], print_every=args['print_every'], early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], use_resize=args['use_resize'])
+            attack = BlackBoxL2(sess, model, batch_size=128, max_iterations=args['maxiter'], print_every=args['print_every'], 
+                     early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], 
+                     binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], 
+                     use_resize=args['use_resize'], adam_beta1=args['adam_beta1'], adam_beta2=args['adam_beta2'], reset_adam_after_found=args['reset_adam'])
 
         random.seed(args['seed'])
         np.random.seed(args['seed'])
@@ -189,6 +195,9 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--init_const", type=float, default=0.0)
     parser.add_argument("-z", "--use_zvalue", action='store_true')
     parser.add_argument("-u", "--untargeted", action='store_true')
+    parser.add_argument("-r", "--reset_adam", action='store_true', help = "reset adam after an initial solution is found")
+    parser.add_argument("--adam_beta1", type=float, default=0.9)
+    parser.add_argument("--adam_beta2", type=float, default=0.999)
     parser.add_argument("--seed", type=int, default=1216)
     args = vars(parser.parse_args())
     # add some additional parameters

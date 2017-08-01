@@ -131,7 +131,7 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100, early_stop_iters = 0,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = True, use_resize = False):
+                 use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False):
         """
         The L_2 optimized attack. 
 
@@ -298,8 +298,9 @@ class BlackBoxL2:
         self.vt = np.zeros(var_size, dtype = np.float32)
         # self.beta1 = 0.8
         # self.beta2 = 0.99
-        self.beta1 = 0.9
-        self.beta2 = 0.999
+        self.beta1 = adam_beta1
+        self.beta2 = adam_beta2
+        self.reset_adam_after_found = reset_adam_after_found
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
         self.stage = 0
         # variables used during optimization process
@@ -576,10 +577,12 @@ class BlackBoxL2:
 
                 # reset ADAM states when a valid example has been found
                 if loss1 == 0.0 and last_loss1 != 0.0 and self.stage == 0:
-                    # self.mt.fill(0.0)
-                    # self.vt.fill(0.0)
-                    # self.adam_epoch.fill(1)
                     # we have reached the fine tunning point
+                    # reset ADAM to avoid overshoot
+                    if self.reset_adam_after_found:
+                        self.mt.fill(0.0)
+                        self.vt.fill(0.0)
+                        self.adam_epoch.fill(1)
                     self.stage = 1
                 last_loss1 = loss1
 

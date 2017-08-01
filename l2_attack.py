@@ -24,7 +24,7 @@ class CarliniL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100, early_stop_iters = 0,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False):
+                 use_log = False, adam_beta1 = 0.9, adam_beta2 = 0.999):
         """
         The L_2 optimized attack. 
 
@@ -122,7 +122,7 @@ class CarliniL2:
         # optimizer = tf.train.MomentumOptimizer(self.LEARNING_RATE, 0.99)
         # optimizer = tf.train.RMSPropOptimizer(self.LEARNING_RATE)
         # optimizer = tf.train.AdadeltaOptimizer(self.LEARNING_RATE)
-        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
+        optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE, adam_beta1, adam_beta2)
         self.train = optimizer.minimize(self.loss, var_list=[self.modifier])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
