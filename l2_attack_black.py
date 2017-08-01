@@ -20,8 +20,8 @@ TARGETED = True          # should we target one specific class? or just be wrong
 CONFIDENCE = 0           # how strong the adversarial example should be
 INITIAL_CONST = 0.5      # the initial constant c to pick as a first guess
 
-# @jit(nopython=True)
-def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
+@jit(nopython=True)
+def coordinate_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
     # indice = np.array(range(0, 3*299*299), dtype = np.int32)
     for i in range(batch_size):
         grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.0002 
@@ -52,9 +52,10 @@ def coordinate_ADAM(losses, indice, grad, batch_size, mt_arr, vt_arr, real_modif
     m[indice] = old_val
     adam_epoch[indice] = epoch + 1
 
+@jit(nopython=True)
 def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
-    def sign(x):
-        return np.piecewise(x, [x < 0, x >= 0], [-1, 1])
+    # def sign(x):
+    #     return np.piecewise(x, [x < 0, x >= 0], [-1, 1])
     cur_loss = losses[0]
     for i in range(batch_size):
         grad[i] = (losses[i*2+1] - losses[i*2+2]) / 0.0002 
@@ -64,7 +65,9 @@ def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, re
     # print('hess', hess)
     # hess[hess < 0] = 1.0
     # hess[np.abs(hess) < 0.1] = sign(hess[np.abs(hess) < 0.1]) * 0.1
+    # negative hessian cannot provide second order information, just do a gradient descent
     hess[hess < 0] = 1.0
+    # hessian too small, could be numerical problems
     hess[hess < 0.1] = 0.1
     # print(hess)
     m = real_modifier.reshape(-1)
@@ -77,7 +80,7 @@ def coordinate_Newton(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, re
     m[indice] = old_val
     # print(m[indice])
 
-# @jit(nopython=True)
+@jit(nopython=True)
 def coordinate_Newton_ADAM(losses, indice, grad, hess, batch_size, mt_arr, vt_arr, real_modifier, up, down, lr, adam_epoch, beta1, beta2, proj):
     cur_loss = losses[0]
     for i in range(batch_size):
@@ -131,7 +134,8 @@ class BlackBoxL2:
                  binary_search_steps = BINARY_SEARCH_STEPS, max_iterations = MAX_ITERATIONS, print_every = 100, early_stop_iters = 0,
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
-                 use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False):
+                 use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False,
+                 solver = "adam"):
         """
         The L_2 optimized attack. 
 
@@ -309,10 +313,22 @@ class BlackBoxL2:
         # for testing
         self.grad_op = tf.gradients(self.loss, self.modifier)
         # compile numba function
-        self.coordinate_ADAM_numba = jit(coordinate_ADAM, nopython = True)
-        self.coordinate_ADAM_numba.recompile()
-        print(self.coordinate_ADAM_numba.inspect_llvm())
+        # self.coordinate_ADAM_numba = jit(coordinate_ADAM, nopython = True)
+        # self.coordinate_ADAM_numba.recompile()
+        # print(self.coordinate_ADAM_numba.inspect_llvm())
         # np.set_printoptions(threshold=np.nan)
+        # set solver
+        solver = solver.lower()
+        if solver == "adam":
+            self.solver = coordinate_ADAM
+        elif solver == "newton":
+            self.solver = coordinate_Newton
+        elif solver == "adam_newton":
+            self.solver = coordinate_Newton_ADAM
+        else:
+            print("unknown solver", solver)
+            self.solver = coordinate_ADAM
+        print("Using", solver, "solver")
 
     def resize_img(self, small_x, small_y):
         self.small_x = small_x
@@ -379,11 +395,12 @@ class BlackBoxL2:
         # t_grad = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
         # self.grad = t_grad[0].reshape(-1)
         # true_grads = self.sess.run(self.grad_op, feed_dict={self.modifier: self.real_modifier})
-        self.coordinate_ADAM_numba(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
-        # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
-        # coordinate_ADAM(losses, indice, self.grad, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh, true_grads)
+        # self.coordinate_ADAM_numba(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # coordinate_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        # coordinate_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh, true_grads)
         # coordinate_Newton(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # coordinate_Newton_ADAM(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
+        self.solver(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
         def get_coo(c, y, x):
