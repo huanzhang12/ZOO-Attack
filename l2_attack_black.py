@@ -588,7 +588,7 @@ class BlackBoxL2:
                 if iteration%(self.print_every) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
-                    print("[STATS] iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
+                    print("[STATS][L2] iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     sys.stdout.flush()
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
@@ -626,6 +626,9 @@ class BlackBoxL2:
                     bestl2 = l2
                     bestscore = np.argmax(score)
                 if l2 < o_bestl2 and compare(score, np.argmax(lab)):
+                    # print a message if it is the first attack found
+                    if o_bestl2 == 1e10:
+                        print("[STATS][L3](First valid attack found!) iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}, l2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, l, loss1, loss2, l2))
                     o_bestl2 = l2
                     o_bestscore = np.argmax(score)
                     o_bestattack = nimg

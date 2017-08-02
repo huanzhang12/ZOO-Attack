@@ -219,7 +219,7 @@ if __name__ == "__main__":
         else:
             if args['dataset'] == "imagenet":
                 if args['untargeted']:
-                    args['maxiter'] = 3000
+                    args['maxiter'] = 1500
                 else:
                     args['maxiter'] = 50000
             elif args['dataset'] == "mnist":
