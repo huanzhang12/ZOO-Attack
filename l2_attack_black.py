@@ -9,6 +9,7 @@ import sys
 import os
 import tensorflow as tf
 import numpy as np
+import scipy.misc
 from numba import jit
 import math
 import time
@@ -136,7 +137,7 @@ class BlackBoxL2:
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
                  use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False,
-                 solver = "adam", save_ckpts = False):
+                 solver = "adam", save_ckpts = False, load_checkpoint = "", start_iter = 0):
         """
         The L_2 optimized attack. 
 
@@ -175,6 +176,7 @@ class BlackBoxL2:
         self.ABORT_EARLY = abort_early
         self.CONFIDENCE = confidence
         self.initial_const = initial_const
+        self.start_iter = start_iter
         self.batch_size = batch_size
         self.num_channels = num_channels
         if use_resize:
@@ -215,8 +217,13 @@ class BlackBoxL2:
             # no resize
             self.scaled_modifier = self.modifier
         # the real variable, initialized to 0
-        # self.real_modifier = np.load('checkpoints/checkpoint6.npy').reshape((1,) + single_shape)
-        self.real_modifier = np.zeros((1,) + small_single_shape, dtype=np.float32)
+        self.load_checkpoint = load_checkpoint
+        if load_checkpoint:
+            # if checkpoint is incorrect reshape will fail
+            print("Using checkpint", load_checkpoint)
+            self.real_modifier = np.load(load_checkpoint).reshape((1,) + small_single_shape)
+        else:
+            self.real_modifier = np.zeros((1,) + small_single_shape, dtype=np.float32)
         # self.real_modifier = np.random.randn(image_size * image_size * num_channels).astype(np.float32).reshape((1,) + single_shape)
         # self.real_modifier /= np.linalg.norm(self.real_modifier) 
         # these are variables to be more efficient in sending data to tf
@@ -323,22 +330,52 @@ class BlackBoxL2:
         # np.set_printoptions(threshold=np.nan)
         # set solver
         solver = solver.lower()
+        self.solver_name = solver
         if solver == "adam":
             self.solver = coordinate_ADAM
         elif solver == "newton":
             self.solver = coordinate_Newton
         elif solver == "adam_newton":
             self.solver = coordinate_Newton_ADAM
-        else:
+        elif solver != "fake_zero":
             print("unknown solver", solver)
             self.solver = coordinate_ADAM
         print("Using", solver, "solver")
+
+    def max_pooling(self, image, size):
+        img_pool = np.copy(image)
+        img_x = image.shape[0]
+        img_y = image.shape[1]
+        for i in range(0, img_x, size):
+            for j in range(0, img_y, size):
+                img_pool[i:i+size, j:j+size] = np.max(image[i:i+size, j:j+size])
+        return img_pool
+
+    def get_new_prob(self, prev_modifier, gen_double = False):
+        prev_modifier = np.squeeze(prev_modifier)
+        old_shape = prev_modifier.shape
+        if gen_double:
+            new_shape = (old_shape[0]*2, old_shape[1]*2, old_shape[2])
+        else:
+            new_shape = old_shape
+        prob = np.empty(shape=new_shape, dtype = np.float32)
+        for i in range(prev_modifier.shape[2]):
+            image = np.abs(prev_modifier[:,:,i])
+            image_pool = self.max_pooling(image, old_shape[0] // 8)
+            if gen_double:
+                prob[:,:,i] = scipy.misc.imresize(image_pool, 2.0, 'nearest', mode = 'F')
+            else:
+                prob[:,:,i] = image_pool
+        prob /= np.sum(prob)
+        return prob
+
 
     def resize_img(self, small_x, small_y):
         self.small_x = small_x
         self.small_y = small_y
         small_single_shape = (self.small_x, self.small_y, self.num_channels)
         # run the resize_op once to get the scaled image
+        prev_modifier = np.copy(self.real_modifier)
         self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size_x: self.small_x, self.resize_size_y: self.small_y, self.resize_input: self.real_modifier})
         # prepare the list of all valid variables
         var_size = self.small_x * self.small_y * self.num_channels
@@ -348,6 +385,9 @@ class BlackBoxL2:
         self.mt = np.zeros(var_size, dtype = np.float32)
         self.vt = np.zeros(var_size, dtype = np.float32)
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
+        # update sample probability
+        self.sample_prob = self.get_new_prob(prev_modifier, True)
+        self.sample_prob = self.sample_prob.reshape(var_size)
 
     def fake_blackbox_optimizer(self):
         true_grads, losses, l2s, loss1, loss2, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.loss1, self.loss2, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
@@ -380,9 +420,10 @@ class BlackBoxL2:
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
         # if self.stage == 0:
-        #     var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        # print(self.sample_prob)
+        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
         # else:
-        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         indice = self.var_list[var_indice]
         # indice = self.var_list
         # regenerate the permutations if we run out
@@ -408,73 +449,12 @@ class BlackBoxL2:
         # adjust sample probability, sample around the points with large gradient
         if self.save_ckpts:
             np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
-        def get_coo(c, y, x):
-            return c * (ns * ns) + y * ns + x
-        # if we are in the initial optimization phase, use a larger sample probability for points that has a large gradient neighbour
-        # if self.stage == 0:
-        if False:
-            thresh = np.sort(np.absolute(self.grad))[- self.batch_size // 10 ]
-            ns = self.model.image_size
-            nc = self.model.num_channels
-            self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
-            # base_prob = 1.0 / var_size * 100.0 * max(0.01, 1.0 / (iteration/10 + 1))
-            base_prob = 1.0 / var_size * 1.0
-            for i in range(self.batch_size):
-                if self.grad[i] > thresh:
-                    # this is an important pixel, increase the sample probability of nearby pixels
-                    ind = indice[i]
-                    # convert to 2D 
-                    ind_c = ind // (ns * ns)
-                    ind_xy = ind % (ns * ns)
-                    ind_y = ind_xy // ns
-                    Ind_x = ind_xy % ns
-                    # print(i, ind_c, ind_y, ind_x, self.grad[i])
-                    cnt = 0
-                    if ind_c != 0:
-                        self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x)] = base_prob
-                        cnt += 1
-                        if ind_x != 0:
-                            self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x - 1)] = base_prob
-                            cnt += 1
-                        if ind_x != ns - 1:
-                            self.sample_prob[get_coo(ind_c - 1, ind_y, ind_x + 1)] = base_prob
-                            cnt += 1
-                        if ind_y != 0:
-                            self.sample_prob[get_coo(ind_c - 1, ind_y - 1, ind_x)] = base_prob
-                            cnt += 1
-                        if ind_y != ns - 1:
-                            self.sample_prob[get_coo(ind_c - 1, ind_y + 1, ind_x)] = base_prob
-                            cnt += 1
-                    if ind_c != nc - 1:
-                        self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x)] = base_prob
-                        cnt += 1
-                        if ind_x != 0:
-                            self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x - 1)] = base_prob
-                            cnt += 1
-                        if ind_x != ns - 1:
-                            self.sample_prob[get_coo(ind_c + 1, ind_y, ind_x + 1)] = base_prob
-                            cnt += 1
-                        if ind_y != 0:
-                            self.sample_prob[get_coo(ind_c + 1, ind_y - 1, ind_x)] = base_prob
-                            cnt += 1
-                        if ind_y != ns - 1:
-                            self.sample_prob[get_coo(ind_c + 1, ind_y + 1, ind_x)] = base_prob
-                            cnt += 1
-                    if ind_x != 0:
-                        self.sample_prob[get_coo(ind_c, ind_y, ind_x - 1)] = base_prob
-                        cnt += 1
-                    if ind_x != ns - 1:
-                        self.sample_prob[get_coo(ind_c, ind_y, ind_x + 1)] = base_prob
-                        cnt += 1
-                    if ind_y != 0:
-                        self.sample_prob[get_coo(ind_c, ind_y - 1, ind_x)] = base_prob
-                        cnt += 1
-                    if ind_y != ns - 1:
-                        self.sample_prob[get_coo(ind_c, ind_y + 1, ind_x)] = base_prob
-                        cnt += 1
-                    # self.sample_prob[indice] /= (cnt / 2)
-            # renormalize
-            self.sample_prob /= np.sum(self.sample_prob)
+
+        # if iteration == 1700:
+        if self.real_modifier.shape[0] > 32:
+            self.sample_prob = self.get_new_prob(self.real_modifier)
+            # self.sample_prob = self.get_new_prob(tmp_mt.reshape(self.real_modifier.shape))
+            self.sample_prob = self.sample_prob.reshape(var_size)
 
         # if the gradient is too small, do not optimize on this variable
         # self.var_list = np.delete(self.var_list, indice[np.abs(self.grad) < 5e-3])
@@ -539,7 +519,8 @@ class BlackBoxL2:
             self.modifier_down = -0.5 - img.reshape(-1)
 
         # clear the modifier
-        self.real_modifier.fill(0.0)
+        if not self.load_checkpoint:
+            self.real_modifier.fill(0.0)
 
         # the best l2, score, and image attack
         o_best_const = CONST
@@ -569,32 +550,35 @@ class BlackBoxL2:
             prev = 1e6
             train_timer = 0.0
             last_loss1 = 1.0
-            self.real_modifier.fill(0.0)
+            if not self.load_checkpoint:
+                self.real_modifier.fill(0.0)
             # reset ADAM status
             self.mt.fill(0.0)
             self.vt.fill(0.0)
             self.adam_epoch.fill(1)
             self.stage = 0
-            for iteration in range(self.MAX_ITERATIONS):
+            for iteration in range(self.start_iter, self.MAX_ITERATIONS):
                 if self.use_resize:
-                    if iteration == 1500:
+                    if iteration == 50*30:
                         self.resize_img(64,64)
-                    if iteration == 4500:
-                        self.resize_img(96,96)
-                    if iteration == 9000:
+                    if iteration == 100*30:
                         self.resize_img(128,128)
+                    if iteration == 180*30:
+                        self.resize_img(256,256)
                 # print out the losses every 10%
                 if iteration%(self.print_every) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
-                    print("[STATS] iter = {}, time = {:.3f}, size = {} loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
+                    print("[STATS] iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     sys.stdout.flush()
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
                 attack_begin_time = time.time()
                 # perform the attack 
-                # l, l2, score, nimg = self.fake_blackbox_optimizer()
-                l, l2, loss1, loss2, score, nimg = self.blackbox_optimizer(iteration)
+                if self.solver_name == "fake_zero":
+                    l, l2, loss1, loss2, score, nimg = self.fake_blackbox_optimizer()
+                else:
+                    l, l2, loss1, loss2, score, nimg = self.blackbox_optimizer(iteration)
                 # l = self.blackbox_optimizer(iteration)
 
                 # reset ADAM states when a valid example has been found
