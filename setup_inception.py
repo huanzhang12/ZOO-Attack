@@ -308,7 +308,11 @@ def main(_):
 
 def readimg(ff):
   f = "../imagenetdata/imgs/"+ff
-  img = np.array(scipy.misc.imresize(scipy.misc.imread(f),(299,299)),dtype=np.float32)/255-.5
+  img = scipy.misc.imread(f)
+  # skip small images (image should be at least 299x299)
+  if img.shape[0] < 299 or img.shape[1] < 299:
+    return None
+  img = np.array(scipy.misc.imresize(img,(299,299)),dtype=np.float32)/255-.5
   if img.shape != (299, 299, 3):
     return None
   return [img, int(ff.split(".")[0])]
@@ -320,6 +324,7 @@ class ImageNet:
     file_list = sorted(os.listdir("../imagenetdata/imgs/"))
     random.shuffle(file_list)
     r = pool.map(readimg, file_list[:200])
+    print(file_list[:200])
     r = [x for x in r if x != None]
     test_data, test_labels = zip(*r)
     self.test_data = np.array(test_data)

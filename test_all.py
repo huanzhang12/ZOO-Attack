@@ -100,7 +100,7 @@ def main(args):
             data, model = ImageNet(), InceptionModel(sess, use_log)
         print('Done...')
         if args['numimg'] == 0:
-            args['numimg'] = len(data.test_labels)
+            args['numimg'] = len(data.test_labels) - args['firstimg']
         print('Using', args['numimg'], 'test images')
         # load attack module
         if args['attack'] == "white":
@@ -171,9 +171,10 @@ def main(args):
             if success:
                 total_success += 1
                 l2_total += l2_distortion
-            suffix = "id{}_seq{}_prev{}_adv{}".format(all_true_ids[i], i, original_class[-1], adversarial_class[-1])
+            suffix = "id{}_seq{}_prev{}_adv{}_{}".format(all_true_ids[i], i, original_class[-1], adversarial_class[-1], success)
+            print("Saving to", suffix)
             show(inputs, "{}/{}/{}_original_{}.png".format(args['save'], args['dataset'], img_no, suffix))
-            show(adv, "{}/{}/{}_adversarial_{}_.png".format(args['save'], args['dataset'], img_no, suffix))
+            show(adv, "{}/{}/{}_adversarial_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv - inputs, "{}/{}/{}_diff_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             print("[STATS][L1] total = {}, seq = {}, id = {}, time = {:.3f}, success = {}, const = {:.6f}, prev_class = {}, new_class = {}, distortion = {:.5f}, success_rate = {:.3f}, l2_avg = {:.5f}".format(img_no, i, all_true_ids[i], timeend - timestart, success, const, original_class[-1], adversarial_class[-1], l2_distortion, total_success / float(img_no), 0 if total_success == 0 else l2_total / total_success))
             sys.stdout.flush()
@@ -187,8 +188,8 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--dataset", choices=["mnist", "cifar10", "imagenet"], default="mnist")
     parser.add_argument("-s", "--save", default="./saved_results")
     parser.add_argument("-a", "--attack", choices=["white", "black"], default="white")
-    parser.add_argument("-n", "--numimg", type=int, default=0)
-    parser.add_argument("-i", "--maxiter", type=int, default=0, help = "set 0 to use default value")
+    parser.add_argument("-n", "--numimg", type=int, default=0, help = "number of test images to attack")
+    parser.add_argument("-m", "--maxiter", type=int, default=0, help = "set 0 to use default value")
     parser.add_argument("-p", "--print_every", type=int, default=100, help = "print objs every PRINT_EVERY iterations")
     parser.add_argument("-o", "--early_stop_iters", type=int, default=100, help = "print objs every EARLY_STOP_ITER iterations, 0 is maxiter//10")
     parser.add_argument("-f", "--firstimg", type=int, default=0)
@@ -217,7 +218,10 @@ if __name__ == "__main__":
             args['maxiter'] = 1000
         else:
             if args['dataset'] == "imagenet":
-                args['maxiter'] = 50000
+                if args['untargeted']:
+                    args['maxiter'] = 3000
+                else:
+                    args['maxiter'] = 50000
             elif args['dataset'] == "mnist":
                 args['maxiter'] = 3000
             else:

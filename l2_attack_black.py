@@ -179,9 +179,10 @@ class BlackBoxL2:
         self.start_iter = start_iter
         self.batch_size = batch_size
         self.num_channels = num_channels
+        self.resize_init_size = 32
         if use_resize:
-            self.small_x = 32
-            self.small_y = 32
+            self.small_x = self.resize_init_size
+            self.small_y = self.resize_init_size
         else:
             self.small_x = image_size
             self.small_y = image_size
@@ -370,13 +371,16 @@ class BlackBoxL2:
         return prob
 
 
-    def resize_img(self, small_x, small_y):
+    def resize_img(self, small_x, small_y, reset_only = False):
         self.small_x = small_x
         self.small_y = small_y
         small_single_shape = (self.small_x, self.small_y, self.num_channels)
-        # run the resize_op once to get the scaled image
-        prev_modifier = np.copy(self.real_modifier)
-        self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size_x: self.small_x, self.resize_size_y: self.small_y, self.resize_input: self.real_modifier})
+        if reset_only:
+            self.real_modifier = np.zeros((1,) + small_single_shape, dtype=np.float32)
+        else:
+            # run the resize_op once to get the scaled image
+            prev_modifier = np.copy(self.real_modifier)
+            self.real_modifier = self.sess.run(self.resize_op, feed_dict={self.resize_size_x: self.small_x, self.resize_size_y: self.small_y, self.resize_input: self.real_modifier})
         # prepare the list of all valid variables
         var_size = self.small_x * self.small_y * self.num_channels
         self.use_var_len = var_size
@@ -386,8 +390,11 @@ class BlackBoxL2:
         self.vt = np.zeros(var_size, dtype = np.float32)
         self.adam_epoch = np.ones(var_size, dtype = np.int32)
         # update sample probability
-        self.sample_prob = self.get_new_prob(prev_modifier, True)
-        self.sample_prob = self.sample_prob.reshape(var_size)
+        if reset_only:
+            self.sample_prob = np.ones(var_size, dtype = np.float32) / var_size
+        else:
+            self.sample_prob = self.get_new_prob(prev_modifier, True)
+            self.sample_prob = self.sample_prob.reshape(var_size)
 
     def fake_blackbox_optimizer(self):
         true_grads, losses, l2s, loss1, loss2, scores, nimgs = self.sess.run([self.grad_op, self.loss, self.l2dist, self.loss1, self.loss2, self.output, self.newimg], feed_dict={self.modifier: self.real_modifier})
@@ -520,7 +527,10 @@ class BlackBoxL2:
 
         # clear the modifier
         if not self.load_checkpoint:
-            self.real_modifier.fill(0.0)
+            if self.use_resize:
+                self.resize_img(self.resize_init_size, self.resize_init_size, True)
+            else:
+                self.real_modifier.fill(0.0)
 
         # the best l2, score, and image attack
         o_best_const = CONST
@@ -551,19 +561,28 @@ class BlackBoxL2:
             train_timer = 0.0
             last_loss1 = 1.0
             if not self.load_checkpoint:
-                self.real_modifier.fill(0.0)
+                if self.use_resize:
+                    self.resize_img(self.resize_init_size, self.resize_init_size, True)
+                else:
+                    self.real_modifier.fill(0.0)
             # reset ADAM status
             self.mt.fill(0.0)
             self.vt.fill(0.0)
             self.adam_epoch.fill(1)
             self.stage = 0
+            multiplier = 1
+            if self.solver_name != "fake_zero":
+                multiplier = 30
             for iteration in range(self.start_iter, self.MAX_ITERATIONS):
                 if self.use_resize:
-                    if iteration == 50*30:
+                    # if iteration == 50*30:
+                    if iteration == 50 * multiplier:
                         self.resize_img(64,64)
-                    if iteration == 100*30:
+                    # if iteration == 100*30:
+                    if iteration == 100 * multiplier:
                         self.resize_img(128,128)
-                    if iteration == 180*30:
+                    # if iteration == 200*30:
+                    if iteration == 200 * multiplier:
                         self.resize_img(256,256)
                 # print out the losses every 10%
                 if iteration%(self.print_every) == 0:
