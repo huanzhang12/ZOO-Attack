@@ -137,7 +137,8 @@ class BlackBoxL2:
                  abort_early = ABORT_EARLY, 
                  initial_const = INITIAL_CONST,
                  use_log = False, use_tanh = True, use_resize = False, adam_beta1 = 0.9, adam_beta2 = 0.999, reset_adam_after_found = False,
-                 solver = "adam", save_ckpts = False, load_checkpoint = "", start_iter = 0):
+                 solver = "adam", save_ckpts = "", load_checkpoint = "", start_iter = 0,
+                 init_size = 32, use_importance = True):
         """
         The L_2 optimized attack. 
 
@@ -179,7 +180,8 @@ class BlackBoxL2:
         self.start_iter = start_iter
         self.batch_size = batch_size
         self.num_channels = num_channels
-        self.resize_init_size = 32
+        self.resize_init_size = init_size
+        self.use_importance = use_importance
         if use_resize:
             self.small_x = self.resize_init_size
             self.small_y = self.resize_init_size
@@ -191,7 +193,7 @@ class BlackBoxL2:
         self.use_resize = use_resize
         self.save_ckpts = save_ckpts
         if save_ckpts:
-            os.system("mkdir -p checkpoints")
+            os.system("mkdir -p {}".format(save_ckpts))
 
         self.repeat = binary_search_steps >= 10
 
@@ -426,11 +428,10 @@ class BlackBoxL2:
         var_size = self.real_modifier.size
         # print(s, "variables remaining")
         # var_indice = np.random.randint(0, self.var_list.size, size=self.batch_size)
-        # if self.stage == 0:
-        # print(self.sample_prob)
-        var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
-        # else:
-        # var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
+        if self.use_importance:
+            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False, p = self.sample_prob)
+        else:
+            var_indice = np.random.choice(self.var_list.size, self.batch_size, replace=False)
         indice = self.var_list[var_indice]
         # indice = self.var_list
         # regenerate the permutations if we run out
@@ -455,10 +456,9 @@ class BlackBoxL2:
         self.solver(losses, indice, self.grad, self.hess, self.batch_size, self.mt, self.vt, self.real_modifier, self.modifier_up, self.modifier_down, self.LEARNING_RATE, self.adam_epoch, self.beta1, self.beta2, not self.use_tanh)
         # adjust sample probability, sample around the points with large gradient
         if self.save_ckpts:
-            np.save('checkpoints/iter{}'.format(iteration), self.real_modifier)
+            np.save('{}/iter{}'.format(self.save_ckpts, iteration), self.real_modifier)
 
-        # if iteration == 1700:
-        if self.real_modifier.shape[0] > 32:
+        if self.real_modifier.shape[0] > self.resize_init_size:
             self.sample_prob = self.get_new_prob(self.real_modifier)
             # self.sample_prob = self.get_new_prob(tmp_mt.reshape(self.real_modifier.shape))
             self.sample_prob = self.sample_prob.reshape(var_size)

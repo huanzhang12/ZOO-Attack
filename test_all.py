@@ -58,6 +58,7 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
             if inception:
                 # for inception, randomly choose 10 target classes
                 seq = np.random.choice(range(1,1001), 10)
+                # seq = [580] # grand piano
             else:
                 # for CIFAR and MNIST, generate all target classes
                 seq = range(data.test_labels.shape[1])
@@ -115,7 +116,8 @@ def main(args):
                      early_stop_iters=args['early_stop_iters'], confidence=0, learning_rate = args['lr'], initial_const=args['init_const'], 
                      binary_search_steps=args['binary_steps'], targeted=not args['untargeted'], use_log=use_log, use_tanh=args['use_tanh'], 
                      use_resize=args['use_resize'], adam_beta1=args['adam_beta1'], adam_beta2=args['adam_beta2'], reset_adam_after_found=args['reset_adam'],
-                     solver=args['solver'], save_ckpts=args['save_ckpts'], load_checkpoint=args['load_ckpt'], start_iter=args['start_iter'])
+                     solver=args['solver'], save_ckpts=args['save_ckpts'], load_checkpoint=args['load_ckpt'], start_iter=args['start_iter'],
+                     init_size=args['init_size'], use_importance=not args['uniform'])
 
         random.seed(args['seed'])
         np.random.seed(args['seed'])
@@ -140,6 +142,8 @@ def main(args):
             original_class = np.argsort(original_predict)
             print("original probabilities:", original_prob[-1:-6:-1])
             print("original classification:", original_class[-1:-6:-1])
+            print("original probabilities (most unlikely):", original_prob[:6])
+            print("original classification (most unlikely):", original_class[:6])
             if original_class[-1] != np.argmax(labels):
                 print("skip wrongly classified image no. {}, original class {}, classified as {}".format(i, np.argmax(labels), original_class[-1]))
                 continue
@@ -203,8 +207,11 @@ if __name__ == "__main__":
     parser.add_argument("--adam_beta2", type=float, default=0.999)
     parser.add_argument("--seed", type=int, default=1216)
     parser.add_argument("--solver", choices=["adam", "newton", "adam_newton", "fake_zero"], default="adam")
+    parser.add_argument("--save_ckpts", default="", help = "path to save checkpoint file")
     parser.add_argument("--load_ckpt", default="", help = "path to numpy checkpoint file")
     parser.add_argument("--start_iter", default=0, type=int, help = "iteration number for start, useful when loading a checkpoint")
+    parser.add_argument("--init_size", default=32, type=int, help = "starting with this size when --use_resize")
+    parser.add_argument("--uniform", action='store_true', help = "disable importance sampling")
     args = vars(parser.parse_args())
     # add some additional parameters
     # learning rate
@@ -212,7 +219,6 @@ if __name__ == "__main__":
     args['inception'] = False
     args['use_tanh'] = True
     # args['use_resize'] = False
-    args['save_ckpts'] = False
     if args['maxiter'] == 0:
         if args['attack'] == "white":
             args['maxiter'] = 1000
@@ -238,7 +244,7 @@ if __name__ == "__main__":
         args['inception'] = True
         args['lr'] = 2e-3
         # args['use_resize'] = True
-        args['save_ckpts'] = True
+        # args['save_ckpts'] = True
     # for mnist, using tanh causes gradient to vanish
     if args['dataset'] == "mnist":
         args['use_tanh'] = False
