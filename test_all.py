@@ -70,12 +70,12 @@ def generate_data(data, samples, targeted=True, start=0, inception=False):
                 inputs.append(data.test_data[start+i])
                 targets.append(np.eye(data.test_labels.shape[1])[j])
                 labels.append(data.test_labels[start+i])
-                true_ids.append(i)
+                true_ids.append(start+i)
         else:
             inputs.append(data.test_data[start+i])
             targets.append(data.test_labels[start+i])
             labels.append(data.test_labels[start+i])
-            true_ids.append(i)
+            true_ids.append(start+i)
 
     inputs = np.array(inputs)
     targets = np.array(targets)
@@ -171,7 +171,7 @@ def main(args):
             if success:
                 total_success += 1
                 l2_total += l2_distortion
-            suffix = "id{}_seq{}_prev{}_adv{}_{}".format(all_true_ids[i], i, original_class[-1], adversarial_class[-1], success)
+            suffix = "id{}_seq{}_prev{}_adv{}_{}_dist{}".format(all_true_ids[i], i, original_class[-1], adversarial_class[-1], success, l2_distortion)
             print("Saving to", suffix)
             show(inputs, "{}/{}/{}_original_{}.png".format(args['save'], args['dataset'], img_no, suffix))
             show(adv, "{}/{}/{}_adversarial_{}.png".format(args['save'], args['dataset'], img_no, suffix))
