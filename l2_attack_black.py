@@ -571,24 +571,25 @@ class BlackBoxL2:
             self.adam_epoch.fill(1)
             self.stage = 0
             multiplier = 1
+            eval_costs = 0
             if self.solver_name != "fake_zero":
-                multiplier = 30
+                multiplier = 24
             for iteration in range(self.start_iter, self.MAX_ITERATIONS):
                 if self.use_resize:
-                    # if iteration == 50*30:
-                    if iteration == 50 * multiplier:
+                    if iteration == 2000:
+                    # if iteration == 2000 // 24:
                         self.resize_img(64,64)
-                    # if iteration == 100*30:
-                    if iteration == 100 * multiplier:
+                    if iteration == 10000:
+                    # if iteration == 2000 // 24 + (10000 - 2000) // 96:
                         self.resize_img(128,128)
                     # if iteration == 200*30:
-                    if iteration == 200 * multiplier:
-                        self.resize_img(256,256)
+                    # if iteration == 250 * multiplier:
+                    #     self.resize_img(256,256)
                 # print out the losses every 10%
                 if iteration%(self.print_every) == 0:
                     # print(iteration,self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier}))
                     loss, real, other, loss1, loss2 = self.sess.run((self.loss,self.real,self.other,self.loss1,self.loss2), feed_dict={self.modifier: self.real_modifier})
-                    print("[STATS][L2] iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
+                    print("[STATS][L2] iter = {}, cost = {}, time = {:.3f}, size = {}, loss = {:.5g}, real = {:.5g}, other = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}".format(iteration, eval_costs, train_timer, self.real_modifier.shape, loss[0], real[0], other[0], loss1[0], loss2[0]))
                     sys.stdout.flush()
                     # np.save('black_iter_{}'.format(iteration), self.real_modifier)
 
@@ -599,6 +600,11 @@ class BlackBoxL2:
                 else:
                     l, l2, loss1, loss2, score, nimg = self.blackbox_optimizer(iteration)
                 # l = self.blackbox_optimizer(iteration)
+
+                if self.solver_name == "fake_zero":
+                    eval_costs += np.prod(self.real_modifier.shape)
+                else:
+                    eval_costs += self.batch_size
 
                 # reset ADAM states when a valid example has been found
                 if loss1 == 0.0 and last_loss1 != 0.0 and self.stage == 0:
@@ -628,7 +634,7 @@ class BlackBoxL2:
                 if l2 < o_bestl2 and compare(score, np.argmax(lab)):
                     # print a message if it is the first attack found
                     if o_bestl2 == 1e10:
-                        print("[STATS][L3](First valid attack found!) iter = {}, time = {:.3f}, size = {}, loss = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}, l2 = {:.5g}".format(iteration, train_timer, self.real_modifier.shape, l, loss1, loss2, l2))
+                        print("[STATS][L3](First valid attack found!) iter = {}, cost = {}, time = {:.3f}, size = {}, loss = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}, l2 = {:.5g}".format(iteration, eval_costs, train_timer, self.real_modifier.shape, l, loss1, loss2, l2))
                     o_bestl2 = l2
                     o_bestscore = np.argmax(score)
                     o_bestattack = nimg
