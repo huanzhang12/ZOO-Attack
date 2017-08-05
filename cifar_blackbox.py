@@ -214,7 +214,7 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
     assert setup_tutorial()
 
     # Create TF session and set as Keras backend session
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     keras.backend.set_session(sess)
 
@@ -311,7 +311,7 @@ if __name__ == '__main__':
     # Flags related to substitute
     flags.DEFINE_integer('holdout', 150, 'Test set holdout for adversary')
     flags.DEFINE_integer('data_aug', 6, 'Nb of substitute data augmentations')
-    flags.DEFINE_integer('nb_epochs_s', 10, 'Training epochs for substitute')
+    flags.DEFINE_integer('nb_epochs_s', 50, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
 
     # Flags related to saving/loading

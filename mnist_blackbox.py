@@ -210,7 +210,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     assert setup_tutorial()
 
     # Create TF session and set as Keras backend session
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     keras.backend.set_session(sess)
 
