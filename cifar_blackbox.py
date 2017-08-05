@@ -11,21 +11,55 @@ from keras import backend
 from keras.utils.np_utils import to_categorical
 from keras.models import Sequential
 from keras.layers import Dense, Flatten, Activation, Dropout
+from keras.datasets import cifar10
+from keras.utils import np_utils
 
 import tensorflow as tf
 from tensorflow.python.platform import app
 from tensorflow.python.platform import flags
 
 from cleverhans.utils_keras import cnn_model
-from cleverhans.utils_mnist import data_mnist
 from cleverhans.utils_tf import model_train, model_eval, batch_eval
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks_tf import jacobian_graph, jacobian_augmentation
 from cleverhans.utils_keras import KerasModelWrapper
 
-from setup_mnist import MNISTModel
+from setup_cifar import CIFARModel
 
 FLAGS = flags.FLAGS
+
+def data_cifar10():
+    """
+    Preprocess CIFAR10 dataset
+    :return:
+    """
+
+    # These values are specific to CIFAR10
+    img_rows = 32
+    img_cols = 32
+    nb_classes = 10
+
+    # the data, shuffled and split between train and test sets
+    (X_train, y_train), (X_test, y_test) = cifar10.load_data()
+
+    if keras.backend.image_dim_ordering() == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 3, img_rows, img_cols)
+        X_test = X_test.reshape(X_test.shape[0], 3, img_rows, img_cols)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], img_rows, img_cols, 3)
+        X_test = X_test.reshape(X_test.shape[0], img_rows, img_cols, 3)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    X_train /= 255
+    X_test /= 255
+    print('X_train shape:', X_train.shape)
+    print(X_train.shape[0], 'train samples')
+    print(X_test.shape[0], 'test samples')
+
+    # convert class vectors to binary class matrices
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+    return X_train, Y_train, X_test, Y_test
 
 
 def setup_tutorial():
@@ -69,7 +103,7 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
     """
 
     # Define TF model graph (for the black-box model)
-    model = MNISTModel(use_log = True).model
+    model = CIFARModel(use_log = True).model
     predictions = model(x)
     print("Defined TensorFlow model graph.")
 
@@ -79,6 +113,7 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
         'batch_size': batch_size,
         'learning_rate': learning_rate
     }
+    # use the restored CIFAR model
     model_train(sess, x, y, predictions, X_train, Y_train, verbose=False,
                 args=train_params)
 
@@ -91,38 +126,6 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
 
     return model, predictions, accuracy
 
-
-def substitute_model(img_rows=28, img_cols=28, nb_classes=10):
-    """
-    Defines the model architecture to be used by the substitute
-    :param img_rows: number of rows in input
-    :param img_cols: number of columns in input
-    :param nb_classes: number of classes in output
-    :return: keras model
-    """
-    model = Sequential()
-
-    # Find out the input shape ordering
-    if keras.backend.image_dim_ordering() == 'th':
-        input_shape = (1, img_rows, img_cols)
-    else:
-        input_shape = (img_rows, img_cols, 1)
-
-    # Define a fully connected model (it's different than the black-box)
-    layers = [Flatten(input_shape=input_shape),
-              Dense(200),
-              Activation('relu'),
-              Dropout(0.5),
-              Dense(200),
-              Activation('relu'),
-              Dropout(0.5),
-              Dense(nb_classes),
-              Activation('softmax')]
-
-    for layer in layers:
-        model.add(layer)
-
-    return model
 
 
 def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
@@ -145,8 +148,7 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
     :return:
     """
     # Define TF model graph (for the black-box model)
-    # model_sub = substitute_model()
-    model_sub = MNISTModel(use_log = True).model
+    model_sub = CIFARModel(use_log = True).model
     preds_sub = model_sub(x)
     print("Defined TensorFlow model graph for the substitute.")
 
@@ -185,10 +187,10 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
     return model_sub, preds_sub
 
 
-def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
+def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
                    test_end=10000, nb_classes=10, batch_size=128,
                    learning_rate=0.001, nb_epochs=10, holdout=150, data_aug=6,
-                   nb_epochs_s=10, lmbda=0.1):
+                   nb_epochs_s=30, lmbda=0.1):
     """
     MNIST tutorial for the black-box attack from arxiv.org/abs/1602.02697
     :param train_start: index of first training set example
@@ -215,10 +217,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     keras.backend.set_session(sess)
 
     # Get MNIST data
-    X_train, Y_train, X_test, Y_test = data_mnist(train_start=train_start,
-                                                  train_end=train_end,
-                                                  test_start=test_start,
-                                                  test_end=test_end)
+    X_train, Y_train, X_test, Y_test = data_cifar10()
 
     # Initialize substitute training set reserved for adversary
     X_sub = X_test[:holdout]
@@ -229,7 +228,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     Y_test = Y_test[holdout:]
 
     # Define input and output TF placeholders
-    x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
+    x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
     y = tf.placeholder(tf.float32, shape=(None, 10))
 
     # Simulate the black-box model locally
@@ -271,7 +270,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
 
 
 def main(argv=None):
-    mnist_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
+    cifar_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
                    learning_rate=FLAGS.learning_rate,
                    nb_epochs=FLAGS.nb_epochs, holdout=FLAGS.holdout,
                    data_aug=FLAGS.data_aug, nb_epochs_s=FLAGS.nb_epochs_s,
@@ -282,7 +281,7 @@ if __name__ == '__main__':
     # General flags
     flags.DEFINE_integer('nb_classes', 10, 'Number of classes in problem')
     flags.DEFINE_integer('batch_size', 128, 'Size of training batches')
-    flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
+    flags.DEFINE_float('learning_rate', 0.01, 'Learning rate for training')
 
     # Flags related to oracle
     flags.DEFINE_integer('nb_epochs', 10, 'Number of epochs to train model')

@@ -60,7 +60,7 @@ class MNIST:
 
 
 class MNISTModel:
-    def __init__(self, restore, session=None, use_log=False):
+    def __init__(self, restore = None, session=None, use_log=False):
         self.num_channels = 1
         self.image_size = 28
         self.num_labels = 10
@@ -89,7 +89,8 @@ class MNISTModel:
         # output log probability, used for black-box attack
         if use_log:
             model.add(Activation('softmax'))
-        model.load_weights(restore)
+        if restore:
+            model.load_weights(restore)
 
         self.model = model
 
