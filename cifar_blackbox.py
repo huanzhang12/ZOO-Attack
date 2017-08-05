@@ -19,7 +19,7 @@ from tensorflow.python.platform import app
 from tensorflow.python.platform import flags
 
 from cleverhans.utils_keras import cnn_model
-from cleverhans.utils_tf import model_train, model_eval, batch_eval
+from cleverhans.utils_tf import model_train, model_eval, batch_eval, tf_model_load
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks_tf import jacobian_graph, jacobian_augmentation
 from cleverhans.utils_keras import KerasModelWrapper
@@ -104,6 +104,7 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
 
     # Define TF model graph (for the black-box model)
     model = CIFARModel(use_log = True).model
+    # model = CIFARModel(use_log = True).model
     predictions = model(x)
     print("Defined TensorFlow model graph.")
 
@@ -114,9 +115,10 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
         'learning_rate': learning_rate
     }
     # use the restored CIFAR model
-    model_train(sess, x, y, predictions, X_train, Y_train, verbose=False,
-                args=train_params)
-
+    # model_train(sess, x, y, predictions, X_train, Y_train, verbose=True, save=True,
+    #             args=train_params)
+    tf_model_load(sess)
+  
     # Print out the accuracy on legitimate data
     eval_params = {'batch_size': batch_size}
     accuracy = model_eval(sess, x, y, predictions, X_test, Y_test,
@@ -189,8 +191,8 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
 
 def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
                    test_end=10000, nb_classes=10, batch_size=128,
-                   learning_rate=0.001, nb_epochs=10, holdout=150, data_aug=6,
-                   nb_epochs_s=30, lmbda=0.1):
+                   learning_rate=0.001, nb_epochs=50, holdout=150, data_aug=6,
+                   nb_epochs_s=50, lmbda=0.1):
     """
     MNIST tutorial for the black-box attack from arxiv.org/abs/1602.02697
     :param train_start: index of first training set example
@@ -250,6 +252,14 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
     acc = model_eval(sess, x, y, preds_sub, X_test, Y_test, args=eval_params)
     accuracies['sub'] = acc
 
+    # Find the correctly predicted labels
+    original_predict = batch_eval(sess, [x], [bbox_preds], [X_test],
+                          args=eval_params)[0]
+    original_class = np.argmax(original_predict, axis = 1)
+    true_class = np.argmax(Y_test, axis = 1)
+    mask = true_class == original_class
+    print(np.sum(mask), "out of", mask.size, "are correct labeled,", len(X_test[mask]))  
+    
     # Initialize the Fast Gradient Sign Method (FGSM) attack object.
     fgsm_par = {'eps': 0.4, 'ord': np.inf, 'clip_min': 0., 'clip_max': 1.}
     wrap = KerasModelWrapper(model_sub)
@@ -265,26 +275,38 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
     print('Test accuracy of oracle on adversarial examples generated '
           'using the substitute: ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex'] = accuracy
+    
+    # Evaluate the accuracy of the "black-box" model on adversarial examples
+    accuracy = model_eval(sess, x, y, bbox_preds, X_test[mask], Y_test[mask],
+                          args=eval_params)
+    print('Test accuracy of excluding originally incorrect labels: ' + str(accuracy))
+    accuracies['bbox_on_sub_adv_ex_exc_ori'] = accuracy
+    # Evaluate the accuracy of the "black-box" model on adversarial examples
+    accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test[mask], Y_test[mask],
+                          args=eval_params)
+    print('Test accuracy of oracle on adversarial examples generated '
+          'using the substitute (excluding originally incorrect labels): ' + str(accuracy))
+    accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
 
     return accuracies
 
 
 def main(argv=None):
-    cifar_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
+    print(cifar_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
                    learning_rate=FLAGS.learning_rate,
                    nb_epochs=FLAGS.nb_epochs, holdout=FLAGS.holdout,
                    data_aug=FLAGS.data_aug, nb_epochs_s=FLAGS.nb_epochs_s,
-                   lmbda=FLAGS.lmbda)
+                   lmbda=FLAGS.lmbda))
 
 
 if __name__ == '__main__':
     # General flags
     flags.DEFINE_integer('nb_classes', 10, 'Number of classes in problem')
     flags.DEFINE_integer('batch_size', 128, 'Size of training batches')
-    flags.DEFINE_float('learning_rate', 0.01, 'Learning rate for training')
+    flags.DEFINE_float('learning_rate', 0.0005, 'Learning rate for training')
 
     # Flags related to oracle
-    flags.DEFINE_integer('nb_epochs', 10, 'Number of epochs to train model')
+    flags.DEFINE_integer('nb_epochs', 50, 'Number of epochs to train model')
 
     # Flags related to substitute
     flags.DEFINE_integer('holdout', 150, 'Test set holdout for adversary')
@@ -292,4 +314,7 @@ if __name__ == '__main__':
     flags.DEFINE_integer('nb_epochs_s', 10, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
 
+    # Flags related to saving/loading
+    flags.DEFINE_string('train_dir', 'sub_saved', 'model saving path')
+    flags.DEFINE_string('filename', 'cifar-model', 'cifar model name')
     app.run()

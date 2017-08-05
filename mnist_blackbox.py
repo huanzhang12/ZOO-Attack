@@ -251,6 +251,14 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     acc = model_eval(sess, x, y, preds_sub, X_test, Y_test, args=eval_params)
     accuracies['sub'] = acc
 
+    # Find the correctly predicted labels
+    original_predict = batch_eval(sess, [x], [bbox_preds], [X_test],
+                          args=eval_params)[0]
+    original_class = np.argmax(original_predict, axis = 1)
+    true_class = np.argmax(Y_test, axis = 1)
+    mask = true_class == original_class
+    print(np.sum(mask), "out of", mask.size, "are correct labeled,", len(X_test[mask]))  
+
     # Initialize the Fast Gradient Sign Method (FGSM) attack object.
     fgsm_par = {'eps': 0.4, 'ord': np.inf, 'clip_min': 0., 'clip_max': 1.}
     wrap = KerasModelWrapper(model_sub)
@@ -267,6 +275,17 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
           'using the substitute: ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex'] = accuracy
 
+    # Evaluate the accuracy of the "black-box" model on adversarial examples
+    accuracy = model_eval(sess, x, y, bbox_preds, X_test[mask], Y_test[mask],
+                          args=eval_params)
+    print('Test accuracy of excluding originally incorrect labels: ' + str(accuracy))
+    accuracies['bbox_on_sub_adv_ex_exc_ori'] = accuracy
+    # Evaluate the accuracy of the "black-box" model on adversarial examples
+    accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test[mask], Y_test[mask],
+                          args=eval_params)
+    print('Test accuracy of oracle on adversarial examples generated '
+          'using the substitute (excluding originally incorrect labels): ' + str(accuracy))
+    accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
     return accuracies
 
 
