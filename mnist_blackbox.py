@@ -18,7 +18,7 @@ from tensorflow.python.platform import flags
 
 from cleverhans.utils_keras import cnn_model
 from cleverhans.utils_mnist import data_mnist
-from cleverhans.utils_tf import model_train, model_eval, batch_eval
+from cleverhans.utils_tf import model_train, model_eval, batch_eval, tf_model_load
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks_tf import jacobian_graph, jacobian_augmentation
 from cleverhans.utils_keras import KerasModelWrapper
@@ -74,13 +74,16 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
     print("Defined TensorFlow model graph.")
 
     # Train an MNIST model
-    train_params = {
-        'nb_epochs': nb_epochs,
-        'batch_size': batch_size,
-        'learning_rate': learning_rate
-    }
-    model_train(sess, x, y, predictions, X_train, Y_train, verbose=False,
-                args=train_params)
+    if FLAGS.load_pretrain:
+        tf_model_load(sess)
+    else:
+        train_params = {
+            'nb_epochs': nb_epochs,
+            'batch_size': batch_size,
+            'learning_rate': learning_rate
+        }
+        model_train(sess, x, y, predictions, X_train, Y_train, verbose=False, save=True,
+                    args=train_params)
 
     # Print out the accuracy on legitimate data
     eval_params = {'batch_size': batch_size}
@@ -311,5 +314,10 @@ if __name__ == '__main__':
     flags.DEFINE_integer('data_aug', 6, 'Nb of substitute data augmentations')
     flags.DEFINE_integer('nb_epochs_s', 10, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
+
+    # Flags related to saving/loading
+    flags.DEFINE_bool('load_pretrain', False, 'load pretrained model from sub_saved/mnist-model')
+    flags.DEFINE_string('train_dir', 'sub_saved', 'model saving path')
+    flags.DEFINE_string('filename', 'mnist-model', 'cifar model name')
 
     app.run()

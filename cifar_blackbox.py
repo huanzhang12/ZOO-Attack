@@ -90,8 +90,8 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
     Define and train a model that simulates the "remote"
     black-box oracle described in the original paper.
     :param sess: the TF session
-    :param x: the input placeholder for MNIST
-    :param y: the ouput placeholder for MNIST
+    :param x: the input placeholder for CIFAR
+    :param y: the ouput placeholder for CIFAR
     :param X_train: the training data for the oracle
     :param Y_train: the training labels for the oracle
     :param X_test: the testing data for the oracle
@@ -108,16 +108,18 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
     predictions = model(x)
     print("Defined TensorFlow model graph.")
 
-    # Train an MNIST model
-    train_params = {
-        'nb_epochs': nb_epochs,
-        'batch_size': batch_size,
-        'learning_rate': learning_rate
-    }
-    # use the restored CIFAR model
-    # model_train(sess, x, y, predictions, X_train, Y_train, verbose=True, save=True,
-    #             args=train_params)
-    tf_model_load(sess)
+    # Train an CIFAR model
+    if FLAGS.load_pretrain:
+        # use the restored CIFAR model
+        tf_model_load(sess)
+    else:
+        train_params = {
+            'nb_epochs': nb_epochs,
+            'batch_size': batch_size,
+            'learning_rate': learning_rate
+        }
+        model_train(sess, x, y, predictions, X_train, Y_train, verbose=True, save=True,
+                    args=train_params)
   
     # Print out the accuracy on legitimate data
     eval_params = {'batch_size': batch_size}
@@ -194,7 +196,7 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
                    learning_rate=0.001, nb_epochs=50, holdout=150, data_aug=6,
                    nb_epochs_s=50, lmbda=0.1):
     """
-    MNIST tutorial for the black-box attack from arxiv.org/abs/1602.02697
+    CIFAR tutorial for the black-box attack from arxiv.org/abs/1602.02697
     :param train_start: index of first training set example
     :param train_end: index of last training set example
     :param test_start: index of first test set example
@@ -218,7 +220,7 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     keras.backend.set_session(sess)
 
-    # Get MNIST data
+    # Get CIFAR data
     X_train, Y_train, X_test, Y_test = data_cifar10()
 
     # Initialize substitute training set reserved for adversary
@@ -315,6 +317,7 @@ if __name__ == '__main__':
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
 
     # Flags related to saving/loading
+    flags.DEFINE_bool('load_pretrain', False, 'load pretrained model from sub_saved/cifar-model')
     flags.DEFINE_string('train_dir', 'sub_saved', 'model saving path')
     flags.DEFINE_string('filename', 'cifar-model', 'cifar model name')
     app.run()
