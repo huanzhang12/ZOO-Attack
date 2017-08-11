@@ -253,6 +253,7 @@ def cifar_blackbox(train_start=0, train_end=60000, test_start=0,
     eval_params = {'batch_size': batch_size}
     acc = model_eval(sess, x, y, preds_sub, X_test, Y_test, args=eval_params)
     accuracies['sub'] = acc
+    print('substitution model accuracy:', acc)
 
     # Find the correctly predicted labels
     original_predict = batch_eval(sess, [x], [bbox_preds], [X_test],

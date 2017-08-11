@@ -13,6 +13,8 @@ from keras import backend
 from keras.utils.np_utils import to_categorical
 from keras.models import Sequential
 from keras.layers import Dense, Flatten, Activation, Dropout
+from keras.datasets import cifar10
+from keras.utils import np_utils
 
 import tensorflow as tf
 from tensorflow.python.platform import app
@@ -27,9 +29,44 @@ from cleverhans.attacks_tf import jacobian_graph, jacobian_augmentation
 from cleverhans.utils_keras import KerasModelWrapper
 
 from setup_mnist import MNISTModel
+from setup_cifar import CIFARModel
 
 FLAGS = flags.FLAGS
 
+DATASET = "cifar"
+
+def data_cifar10():
+    """
+    Preprocess CIFAR10 dataset
+    :return:
+    """
+
+    # These values are specific to CIFAR10
+    img_rows = 32
+    img_cols = 32
+    nb_classes = 10
+
+    # the data, shuffled and split between train and test sets
+    (X_train, y_train), (X_test, y_test) = cifar10.load_data()
+
+    if keras.backend.image_dim_ordering() == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 3, img_rows, img_cols)
+        X_test = X_test.reshape(X_test.shape[0], 3, img_rows, img_cols)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], img_rows, img_cols, 3)
+        X_test = X_test.reshape(X_test.shape[0], img_rows, img_cols, 3)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    X_train /= 255
+    X_test /= 255
+    print('X_train shape:', X_train.shape)
+    print(X_train.shape[0], 'train samples')
+    print(X_test.shape[0], 'test samples')
+
+    # convert class vectors to binary class matrices
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+    return X_train, Y_train, X_test, Y_test
 
 def setup_tutorial():
     """
@@ -72,7 +109,10 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
     """
 
     # Define TF model graph (for the black-box model)
-    model = MNISTModel(use_log = True).model
+    if DATASET == "mnist":
+        model = MNISTModel(use_log = True).model
+    else:
+        model = CIFARModel(use_log = True).model
     predictions = model(x)
     print("Defined TensorFlow model graph.")
 
@@ -152,7 +192,10 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
     """
     # Define TF model graph (for the black-box model)
     # model_sub = substitute_model()
-    model_sub = MNISTModel(use_log = True).model
+    if DATASET == "mnist":
+        model_sub = MNISTModel(use_log = True).model
+    else:
+        model_sub = CIFARModel(use_log = True).model
     preds_sub = model_sub(x)
     print("Defined TensorFlow model graph for the substitute.")
 
@@ -173,7 +216,7 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
         # If we are not at last substitute training iteration, augment dataset
         if rho < data_aug - 1:
             if FLAGS.cached_aug:
-                augs = np.load('sub_saved/mnist-aug-{}.npz'.format(rho))
+                augs = np.load('sub_saved/{}-aug-{}.npz'.format(DATASET, rho))
                 X_sub = augs['X_sub']
                 Y_sub = augs['Y_sub']
             else:
@@ -194,7 +237,7 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
                 Y_sub[int(len(X_sub)/2):] = np.argmax(bbox_val, axis=1)
                 # cache the augmentation
                 if not FLAGS.cached_aug:
-                    np.savez('sub_saved/mnist-aug-{}.npz'.format(rho), X_sub = X_sub, Y_sub = Y_sub)
+                    np.savez('sub_saved/{}-aug-{}.npz'.format(DATASET, rho), X_sub = X_sub, Y_sub = Y_sub)
 
     return model_sub, preds_sub
 
@@ -229,10 +272,13 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     keras.backend.set_session(sess)
 
     # Get MNIST data
-    X_train, Y_train, X_test, Y_test = data_mnist(train_start=train_start,
-                                                  train_end=train_end,
-                                                  test_start=test_start,
-                                                  test_end=test_end)
+    if DATASET == "mnist":
+        X_train, Y_train, X_test, Y_test = data_mnist(train_start=train_start,
+                                                      train_end=train_end,
+                                                      test_start=test_start,
+                                                      test_end=test_end)
+    else:
+        X_train, Y_train, X_test, Y_test = data_cifar10()
 
     # Initialize substitute training set reserved for adversary
     X_sub = X_test[:holdout]
@@ -246,7 +292,10 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     Y_test = Y_test[:FLAGS.n_attack]
 
     # Define input and output TF placeholders
-    x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
+    if DATASET == "mnist":
+        x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
+    else:
+        x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
     y = tf.placeholder(tf.float32, shape=(None, 10))
 
     # Simulate the black-box model locally
@@ -323,7 +372,10 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
             # duplicate the inputs by 9 times
             adv_inputs = np.array([[instance] * 9 for instance in X_test],
                                   dtype=np.float32)
-            adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 28, 28, 1))
+            if DATASET == "mnist":
+                adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 28, 28, 1))
+            else:
+                adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 32, 32, 3))
             # also update the mask
             mask = np.repeat(mask, 9)
             ori_labels = np.repeat(Y_test, 9, axis=0)
@@ -410,15 +462,24 @@ if __name__ == '__main__':
     flags.DEFINE_integer('nb_classes', 10, 'Number of classes in problem')
     flags.DEFINE_integer('batch_size', 128, 'Size of training batches')
     flags.DEFINE_integer('n_attack', -1, 'No. of images used for attack')
-    flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
+    if DATASET == "mnist":
+        flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
+    else:
+        flags.DEFINE_float('learning_rate', 0.0005, 'Learning rate for training')
 
     # Flags related to oracle
-    flags.DEFINE_integer('nb_epochs', 10, 'Number of epochs to train model')
+    if DATASET == "mnist":
+        flags.DEFINE_integer('nb_epochs', 10, 'Number of epochs to train model')
+    else:
+        flags.DEFINE_integer('nb_epochs', 50, 'Number of epochs to train model')
 
     # Flags related to substitute
     flags.DEFINE_integer('holdout', 150, 'Test set holdout for adversary')
     flags.DEFINE_integer('data_aug', 6, 'Nb of substitute data augmentations')
-    flags.DEFINE_integer('nb_epochs_s', 30, 'Training epochs for substitute')
+    if DATASET == "mnist":
+        flags.DEFINE_integer('nb_epochs_s', 30, 'Training epochs for substitute')
+    else:
+        flags.DEFINE_integer('nb_epochs_s', 50, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
 
     # Flags related to attack
@@ -429,7 +490,10 @@ if __name__ == '__main__':
     flags.DEFINE_bool('load_pretrain', False, 'load pretrained model from sub_saved/mnist-model')
     flags.DEFINE_bool('cached_aug', False, 'use cached augmentation in sub_saved')
     flags.DEFINE_string('train_dir', 'sub_saved', 'model saving path')
-    flags.DEFINE_string('filename', 'mnist-model', 'cifar model name')
+    if DATASET == "mnist":
+        flags.DEFINE_string('filename', 'mnist-model', 'mnist model name')
+    else:
+        flags.DEFINE_string('filename', 'cifar-model', 'cifar model name')
 
     os.system("mkdir -p sub_saved")
 
