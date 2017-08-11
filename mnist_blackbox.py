@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os
 import numpy as np
 from six.moves import xrange
 
@@ -170,21 +171,29 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
 
         # If we are not at last substitute training iteration, augment dataset
         if rho < data_aug - 1:
-            print("Augmenting substitute training data.")
-            # Perform the Jacobian augmentation
-            X_sub = jacobian_augmentation(sess, x, X_sub, Y_sub, grads, lmbda)
+            if FLAGS.cached_aug:
+                augs = np.load('sub_saved/mnist-aug-{}.npz'.format(rho))
+                X_sub = augs['X_sub']
+                Y_sub = augs['Y_sub']
+            else:
+                print("Augmenting substitute training data.")
+                # Perform the Jacobian augmentation
+                X_sub = jacobian_augmentation(sess, x, X_sub, Y_sub, grads, lmbda)
 
-            print("Labeling substitute training data.")
-            # Label the newly generated synthetic points using the black-box
-            Y_sub = np.hstack([Y_sub, Y_sub])
-            X_sub_prev = X_sub[int(len(X_sub)/2):]
-            eval_params = {'batch_size': batch_size}
-            bbox_val = batch_eval(sess, [x], [bbox_preds], [X_sub_prev],
-                                  args=eval_params)[0]
-            # Note here that we take the argmax because the adversary
-            # only has access to the label (not the probabilities) output
-            # by the black-box model
-            Y_sub[int(len(X_sub)/2):] = np.argmax(bbox_val, axis=1)
+                print("Labeling substitute training data.")
+                # Label the newly generated synthetic points using the black-box
+                Y_sub = np.hstack([Y_sub, Y_sub])
+                X_sub_prev = X_sub[int(len(X_sub)/2):]
+                eval_params = {'batch_size': batch_size}
+                bbox_val = batch_eval(sess, [x], [bbox_preds], [X_sub_prev],
+                                      args=eval_params)[0]
+                # Note here that we take the argmax because the adversary
+                # only has access to the label (not the probabilities) output
+                # by the black-box model
+                Y_sub[int(len(X_sub)/2):] = np.argmax(bbox_val, axis=1)
+                # cache the augmentation
+                if not FLAGS.cached_aug:
+                    np.savez('sub_saved/mnist-aug-{}.npz'.format(rho), X_sub = X_sub, Y_sub = Y_sub)
 
     return model_sub, preds_sub
 
@@ -232,8 +241,8 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     X_test = X_test[holdout:]
     Y_test = Y_test[holdout:]
 
-    X_test = X_test[:10]
-    Y_test = Y_test[:10]
+    X_test = X_test[:FLAGS.n_attack]
+    Y_test = Y_test[:FLAGS.n_attack]
 
     # Define input and output TF placeholders
     x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
@@ -290,7 +299,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
                      'abort_early': True,
                      'learning_rate': 0.01,
                      'batch_size': 1,
-                     'initial_const': 10,
+                     'initial_const': 0.01,
                      'confidence': 20}
         adv_inputs = X_test
         attacker = cwl2
@@ -311,7 +320,16 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
           'using the substitute (NP): ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex'] = accuracy
 
-    print(x_adv_sub_np.shape)
+    # Evaluate the targeted attack
+    bbox_adv_predict = batch_eval(sess, [x], [bbox_preds], [x_adv_sub_np],
+                          args=eval_params)[0]
+    bbox_adv_class = np.argmax(bbox_adv_predict, axis = 1)
+    true_class = np.argmax(Y_test, axis = 1)
+    untargeted_success = np.mean(bbox_adv_class != true_class)
+    print('Untargeted attack success rate:', untargeted_success)
+    # targeted_success = np.mean(bbox_adv_class == targeted_class)
+    # targeted_success = np.mean(bbox_adv_class == targeted_class)
+
     if attack == "cwl2":
         # Compute the L2 pertubations of generated adversarial examples
         percent_perturbed = np.sum((x_adv_sub_np - adv_inputs)**2, axis=(1, 2, 3))**.5
@@ -323,7 +341,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     # Evaluate the accuracy of the "black-box" model on adversarial examples
     accuracy = model_eval(sess, x, y, bbox_preds, X_test[mask], Y_test[mask],
                           args=eval_params)
-    print('Test accuracy of excluding originally incorrect labels: ' + str(accuracy))
+    print('Test accuracy of excluding originally incorrect labels (should be 1.0): ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex_exc_ori'] = accuracy
 
     if attack == "fgsm":
@@ -357,6 +375,7 @@ if __name__ == '__main__':
     # General flags
     flags.DEFINE_integer('nb_classes', 10, 'Number of classes in problem')
     flags.DEFINE_integer('batch_size', 128, 'Size of training batches')
+    flags.DEFINE_integer('n_attack', -1, 'No. of images used for attack')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
 
     # Flags related to oracle
@@ -365,7 +384,7 @@ if __name__ == '__main__':
     # Flags related to substitute
     flags.DEFINE_integer('holdout', 150, 'Test set holdout for adversary')
     flags.DEFINE_integer('data_aug', 6, 'Nb of substitute data augmentations')
-    flags.DEFINE_integer('nb_epochs_s', 10, 'Training epochs for substitute')
+    flags.DEFINE_integer('nb_epochs_s', 30, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
 
     # Flags related to attack
@@ -373,7 +392,10 @@ if __name__ == '__main__':
 
     # Flags related to saving/loading
     flags.DEFINE_bool('load_pretrain', False, 'load pretrained model from sub_saved/mnist-model')
+    flags.DEFINE_bool('cached_aug', False, 'use cached augmentation in sub_saved')
     flags.DEFINE_string('train_dir', 'sub_saved', 'model saving path')
     flags.DEFINE_string('filename', 'mnist-model', 'cifar model name')
+
+    os.system("mkdir -p sub_saved")
 
     app.run()
