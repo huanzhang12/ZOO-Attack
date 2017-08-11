@@ -125,7 +125,7 @@ def prep_bbox(sess, x, y, X_train, Y_train, X_test, Y_test,
             'batch_size': batch_size,
             'learning_rate': learning_rate
         }
-        model_train(sess, x, y, predictions, X_train, Y_train, verbose=False, save=True,
+        model_train(sess, x, y, predictions, X_train, Y_train, verbose=True, save=True,
                     args=train_params)
 
     # Print out the accuracy on legitimate data
@@ -455,6 +455,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
 
 
 def main(argv=None):
+    print(FLAGS)
     mnist_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
                    learning_rate=FLAGS.learning_rate,
                    nb_epochs=FLAGS.nb_epochs, holdout=FLAGS.holdout,
