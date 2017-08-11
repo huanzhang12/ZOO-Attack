@@ -407,6 +407,8 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     bbox_adv_predict = batch_eval(sess, [x], [bbox_preds], [x_adv_sub_np],
                           args=eval_params)[0]
     bbox_adv_class = np.argmax(bbox_adv_predict, axis = 1)
+    print(bbox_adv_class)
+    print(true_class)
     true_class = np.argmax(ori_labels, axis = 1)
     untargeted_success = np.mean(bbox_adv_class != true_class)
     print('Untargeted attack success rate:', untargeted_success)
@@ -419,10 +421,13 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     if attack == "cwl2":
         # Compute the L2 pertubations of generated adversarial examples
         percent_perturbed = np.sum((x_adv_sub_np - adv_inputs)**2, axis=(1, 2, 3))**.5
-        # print(percent_perturbed)
+        print(percent_perturbed)
         # print('Avg. L_2 norm of perturbations {0:.4f}'.format(np.mean(percent_perturbed)))
         # when computing the mean, removing the failure attacks first
-        print('Avg. L_2 norm of perturbations {0:.4f}'.format(np.mean(percent_perturbed[percent_perturbed > 1e-8])))
+        print('Avg. L_2 norm of all perturbations {0:.4f}'.format(np.mean(percent_perturbed[percent_perturbed > 1e-8])))
+        print('Avg. L_2 norm of successful untargeted perturbations {0:.4f}'.format(np.mean(percent_perturbed[bbox_adv_class != true_class])))
+        if targeted:
+            print('Avg. L_2 norm of successful targeted perturbations {0:.4f}'.format(np.mean(percent_perturbed[bbox_adv_class == targeted_class])))
 
     # Evaluate the accuracy of the "black-box" model on adversarial examples
     accuracy = model_eval(sess, x, y, bbox_preds, adv_inputs[mask], ori_labels[mask],
