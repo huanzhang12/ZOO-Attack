@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import os
+import time
 import numpy as np
 from six.moves import xrange
 
@@ -256,16 +257,20 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     model, bbox_preds, accuracies['bbox'] = prep_bbox_out
 
     # Train substitute using method from https://arxiv.org/abs/1602.02697
+    time_start = time.time()
     print("Training the substitute model.")
     train_sub_out = train_sub(sess, x, y, bbox_preds, X_sub, Y_sub,
                               nb_classes, nb_epochs_s, batch_size,
                               learning_rate, data_aug, lmbda)
     model_sub, preds_sub = train_sub_out
+    time_end = time.time()
+    print("Substitue model training time:", time_end - time_start)
 
     # Evaluate the substitute model on clean test examples
     eval_params = {'batch_size': batch_size}
     acc = model_eval(sess, x, y, preds_sub, X_test, Y_test, args=eval_params)
     accuracies['sub'] = acc
+    print('substitution model accuracy:', acc)
 
     # Find the correctly predicted labels
     original_predict = batch_eval(sess, [x], [bbox_preds], [X_test],
@@ -273,7 +278,6 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     original_class = np.argmax(original_predict, axis = 1)
     true_class = np.argmax(Y_test, axis = 1)
     mask = true_class == original_class
-    print(Y_test)
     print(np.sum(mask), "out of", mask.size, "are correct labeled,", len(X_test[mask]))  
 
     # Initialize the Fast Gradient Sign Method (FGSM) attack object.
@@ -336,6 +340,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
               'using the substitute: ' + str(accuracy))
         accuracies['bbox_on_sub_adv_ex'] = accuracy
 
+    time_start = time.time()
     # Evaluate the accuracy of the "black-box" model on adversarial examples
     x_adv_sub_np = attacker.generate_np(adv_inputs, **attacker_params)
     accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_np, ori_labels,
@@ -343,6 +348,8 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     print('Test accuracy of oracle on adversarial examples generated '
           'using the substitute (NP): ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex'] = accuracy
+    time_end = time.time()
+    print('Attack time:', time_end - time_start)
 
     # Evaluate the targeted attack
     bbox_adv_predict = batch_eval(sess, [x], [bbox_preds], [x_adv_sub_np],
