@@ -369,6 +369,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
                     adv_ys.append(np.eye(10)[j])
                     targeted_class.append(j)
             attacker_params['y_target'] = np.array(adv_ys, dtype=np.float32)
+            attacker_params['batch_size'] = 9
             # duplicate the inputs by 9 times
             adv_inputs = np.array([[instance] * 9 for instance in X_test],
                                   dtype=np.float32)
@@ -455,7 +456,15 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
 
 
 def main(argv=None):
-    print(FLAGS)
+    print("DATASET:", DATASET)
+    print("Targeted:", FLAGS.targeted)
+    print("Attack:", FLAGS.attack)
+    print("Use Pretrained", FLAGS.load_pretrain)
+    print("Train Epochs:", FLAGS.nb_epochs)
+    print("Sub Train Epochs:", FLAGS.nb_epochs_s)
+    print("Holdout Size:", FLAGS.holdout)
+    print("Data Augmentation:", FLAGS.data_aug)
+    print("Number of Attacks:", FLAGS.n_attack)
     mnist_blackbox(nb_classes=FLAGS.nb_classes, batch_size=FLAGS.batch_size,
                    learning_rate=FLAGS.learning_rate,
                    nb_epochs=FLAGS.nb_epochs, holdout=FLAGS.holdout,
