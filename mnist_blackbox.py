@@ -19,6 +19,7 @@ from tensorflow.python.platform import flags
 from cleverhans.utils_keras import cnn_model
 from cleverhans.utils_mnist import data_mnist
 from cleverhans.utils_tf import model_train, model_eval, batch_eval, tf_model_load
+from cleverhans.attacks import CarliniWagnerL2
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks_tf import jacobian_graph, jacobian_augmentation
 from cleverhans.utils_keras import KerasModelWrapper
@@ -191,7 +192,7 @@ def train_sub(sess, x, y, bbox_preds, X_sub, Y_sub, nb_classes,
 def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
                    test_end=10000, nb_classes=10, batch_size=128,
                    learning_rate=0.001, nb_epochs=10, holdout=150, data_aug=6,
-                   nb_epochs_s=10, lmbda=0.1):
+                   nb_epochs_s=10, lmbda=0.1, attack="fgsm"):
     """
     MNIST tutorial for the black-box attack from arxiv.org/abs/1602.02697
     :param train_start: index of first training set example
@@ -213,7 +214,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     assert setup_tutorial()
 
     # Create TF session and set as Keras backend session
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.45)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     keras.backend.set_session(sess)
 
@@ -230,6 +231,9 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     # Redefine test set as remaining samples unavailable to adversaries
     X_test = X_test[holdout:]
     Y_test = Y_test[holdout:]
+
+    X_test = X_test[:10]
+    Y_test = Y_test[:10]
 
     # Define input and output TF placeholders
     x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
@@ -263,32 +267,81 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     print(np.sum(mask), "out of", mask.size, "are correct labeled,", len(X_test[mask]))  
 
     # Initialize the Fast Gradient Sign Method (FGSM) attack object.
-    fgsm_par = {'eps': 0.4, 'ord': np.inf, 'clip_min': 0., 'clip_max': 1.}
     wrap = KerasModelWrapper(model_sub)
-    fgsm = FastGradientMethod(wrap, sess=sess)
+
 
     # Craft adversarial examples using the substitute
     eval_params = {'batch_size': batch_size}
-    x_adv_sub = fgsm.generate(x, **fgsm_par)
+
+    if attack == "fgsm":
+        attacker_params = {'eps': 0.4, 'ord': np.inf, 'clip_min': 0., 'clip_max': 1.}
+        fgsm = FastGradientMethod(wrap, sess=sess)
+        x_adv_sub = fgsm.generate(x, **attacker_params)
+        attacker = fgsm
+        print("Running FGSM attack...")
+    else:
+        print("Running Carlini and Wagner\'s L2 attack...")
+        yname = "y"
+        adv_ys = None
+        # wrap = KerasModelWrapper(model)
+        cwl2 = CarliniWagnerL2(wrap, back='tf', sess=sess)
+        attacker_params = {'binary_search_steps': 9,
+                     'max_iterations': 2000,
+                     'abort_early': True,
+                     'learning_rate': 0.01,
+                     'batch_size': 1,
+                     'initial_const': 10,
+                     'confidence': 20}
+        adv_inputs = X_test
+        attacker = cwl2
+
+    if attack == "fgsm":
+        # Evaluate the accuracy of the "black-box" model on adversarial examples
+        accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test, Y_test,
+                              args=eval_params)
+        print('Test accuracy of oracle on adversarial examples generated '
+              'using the substitute: ' + str(accuracy))
+        accuracies['bbox_on_sub_adv_ex'] = accuracy
 
     # Evaluate the accuracy of the "black-box" model on adversarial examples
-    accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test, Y_test,
+    x_adv_sub_np = attacker.generate_np(X_test, **attacker_params)
+    accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_np, Y_test,
                           args=eval_params)
     print('Test accuracy of oracle on adversarial examples generated '
-          'using the substitute: ' + str(accuracy))
+          'using the substitute (NP): ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex'] = accuracy
+
+    print(x_adv_sub_np.shape)
+    if attack == "cwl2":
+        # Compute the L2 pertubations of generated adversarial examples
+        percent_perturbed = np.sum((x_adv_sub_np - adv_inputs)**2, axis=(1, 2, 3))**.5
+        print(percent_perturbed)
+        print('Avg. L_2 norm of perturbations {0:.4f}'.format(np.mean(percent_perturbed)))
+        # when computing the mean, removing the failure attacks first
+        print('Avg. L_2 norm of perturbations {0:.4f}'.format(np.mean(percent_perturbed[percent_perturbed > 1e-8])))
 
     # Evaluate the accuracy of the "black-box" model on adversarial examples
     accuracy = model_eval(sess, x, y, bbox_preds, X_test[mask], Y_test[mask],
                           args=eval_params)
     print('Test accuracy of excluding originally incorrect labels: ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex_exc_ori'] = accuracy
-    # Evaluate the accuracy of the "black-box" model on adversarial examples
-    accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test[mask], Y_test[mask],
+
+    if attack == "fgsm":
+        # Evaluate the accuracy of the "black-box" model on adversarial examples (excluding correct)
+        accuracy = model_eval(sess, x, y, model(x_adv_sub), X_test[mask], Y_test[mask],
+                              args=eval_params)
+        print('Test accuracy of oracle on adversarial examples generated '
+              'using the substitute (excluding originally incorrect labels): ' + str(accuracy))
+        accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
+
+    # Evaluate the accuracy of the "black-box" model on adversarial examples (excluding correct)
+    x_adv_sub_mask_np = x_adv_sub_np[mask]
+    accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_mask_np, Y_test[mask],
                           args=eval_params)
     print('Test accuracy of oracle on adversarial examples generated '
-          'using the substitute (excluding originally incorrect labels): ' + str(accuracy))
+          'using the substitute (excluding originally incorrect labels, NP): ' + str(accuracy))
     accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
+
     return accuracies
 
 
@@ -297,7 +350,7 @@ def main(argv=None):
                    learning_rate=FLAGS.learning_rate,
                    nb_epochs=FLAGS.nb_epochs, holdout=FLAGS.holdout,
                    data_aug=FLAGS.data_aug, nb_epochs_s=FLAGS.nb_epochs_s,
-                   lmbda=FLAGS.lmbda)
+                   lmbda=FLAGS.lmbda, attack=FLAGS.attack)
 
 
 if __name__ == '__main__':
@@ -314,6 +367,9 @@ if __name__ == '__main__':
     flags.DEFINE_integer('data_aug', 6, 'Nb of substitute data augmentations')
     flags.DEFINE_integer('nb_epochs_s', 10, 'Training epochs for substitute')
     flags.DEFINE_float('lmbda', 0.1, 'Lambda from arxiv.org/abs/1602.02697')
+
+    # Flags related to attack
+    flags.DEFINE_string('attack', 'cwl2', 'cwl2 = Carlini & Wagner\'s L2 attack, fgsm = Fast Gradient Sign Method')
 
     # Flags related to saving/loading
     flags.DEFINE_bool('load_pretrain', False, 'load pretrained model from sub_saved/mnist-model')
