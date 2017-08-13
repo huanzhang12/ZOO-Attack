@@ -147,7 +147,7 @@ class CarliniL2:
         print('go up to',len(imgs))
         for i in range(0,len(imgs),self.batch_size):
             print('tick',i)
-            r.extend(self.attack_batch(imgs[i:i+self.batch_size], targets[i:i+self.batch_size]))
+            r.extend(self.attack_batch(imgs[i:i+self.batch_size], targets[i:i+self.batch_size])[0])
         return np.array(r)
 
     def attack_batch(self, imgs, labs):

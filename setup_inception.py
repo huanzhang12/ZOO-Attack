@@ -254,9 +254,10 @@ class InceptionModel:
       output_name = 'InceptionV3/Predictions/Reshape:0'
     # scaled = (0.5+tf.reshape(img,((299,299,3))))*255
     # scaled = (0.5+img)*255
+    shape = (int(img.shape[0]), 1001)
     softmax_tensor = tf.import_graph_def(
       self.sess.graph.as_graph_def(),
-      input_map={'input:0': img},
+      input_map={'input:0': img, 'InceptionV3/Predictions/Shape:0': shape},
       return_elements=[output_name])
     return softmax_tensor[0]
   
