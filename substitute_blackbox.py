@@ -267,7 +267,7 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     assert setup_tutorial()
 
     # Create TF session and set as Keras backend session
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.45)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=1.0)
     sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
     keras.backend.set_session(sess)
 
@@ -297,6 +297,8 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
     else:
         x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
     y = tf.placeholder(tf.float32, shape=(None, 10))
+    # for feed targeted attack labels
+    t_y = tf.placeholder(tf.float32, shape=(None, 10))
 
     # Simulate the black-box model locally
     # You could replace this by a remote labeling API for instance
@@ -334,16 +336,47 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
 
 
     # Craft adversarial examples using the substitute
-    eval_params = {'batch_size': batch_size}
+    if targeted and attack == "fgsm":
+        # TODO: fix the batch size mess
+        eval_params = {'batch_size': FLAGS.n_attack * 9}
+    else:
+        eval_params = {'batch_size': batch_size}
 
+    adv_inputs = X_test
+    ori_labels = Y_test
+
+    # generate targeted labels, 9 for each test example
+    if targeted:
+        adv_ys = []
+        targeted_class = []
+        for i in range(0, X_test.shape[0]):
+            for j in range(0,10):
+                # skip the original image label
+                if j == np.argmax(Y_test[i]):
+                    continue
+                adv_ys.append(np.eye(10)[j])
+                targeted_class.append(j)
+        # duplicate the inputs by 9 times
+        adv_inputs = np.array([[instance] * 9 for instance in X_test],
+                              dtype=np.float32)
+        if DATASET == "mnist":
+            adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 28, 28, 1))
+        else:
+            adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 32, 32, 3))
+        # also update the mask
+        mask = np.repeat(mask, 9)
+        ori_labels = np.repeat(Y_test, 9, axis=0)
+        adv_ys = np.array(adv_ys, dtype=np.float32)
+    
     if attack == "fgsm":
         attacker_params = {'eps': 0.4, 'ord': np.inf, 'clip_min': 0., 'clip_max': 1.}
+        # wrap = KerasModelWrapper(model)
         fgsm = FastGradientMethod(wrap, sess=sess)
-        x_adv_sub = fgsm.generate(x, **attacker_params)
         attacker = fgsm
-        adv_inputs = X_test
-        ori_labels = Y_test
         print("Running FGSM attack...")
+        if targeted:
+            attacker_params['y_target'] = t_y
+        x_adv_sub = fgsm.generate(x, **attacker_params)
     else:
         print("Running Carlini and Wagner\'s L2 attack...")
         yname = "y"
@@ -359,54 +392,40 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
                      'confidence': 20}
         # generate targeted labels, 9 for each test example
         if targeted:
-            adv_ys = []
-            targeted_class = []
-            for i in range(0, X_test.shape[0]):
-                for j in range(0,10):
-                    # skip the original image label
-                    if j == np.argmax(Y_test[i]):
-                        continue
-                    adv_ys.append(np.eye(10)[j])
-                    targeted_class.append(j)
-            attacker_params['y_target'] = np.array(adv_ys, dtype=np.float32)
-            attacker_params['batch_size'] = 9
-            # duplicate the inputs by 9 times
-            adv_inputs = np.array([[instance] * 9 for instance in X_test],
-                                  dtype=np.float32)
-            if DATASET == "mnist":
-                adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 28, 28, 1))
-            else:
-                adv_inputs = adv_inputs.reshape((X_test.shape[0] * 9, 32, 32, 3))
-            # also update the mask
-            mask = np.repeat(mask, 9)
-            ori_labels = np.repeat(Y_test, 9, axis=0)
-        else:
-            adv_inputs = X_test
-            ori_labels = Y_test
+            attacker_params['y_target'] = adv_ys
+            # attacker_params['batch_size'] = 9
         attacker = cwl2
 
+    time_start = time.time()
     if attack == "fgsm":
         # Evaluate the accuracy of the "black-box" model on adversarial examples
-        accuracy = model_eval(sess, x, y, model(x_adv_sub), adv_inputs, ori_labels,
-                              args=eval_params)
+        if targeted:
+            accuracy = model_eval(sess, x, y, model(x_adv_sub), adv_inputs, ori_labels, feed={t_y: adv_ys},
+                                  args=eval_params)
+        else:
+            accuracy = model_eval(sess, x, y, model(x_adv_sub), adv_inputs, ori_labels,
+                                  args=eval_params)
         print('Test accuracy of oracle on adversarial examples generated '
               'using the substitute: ' + str(accuracy))
         accuracies['bbox_on_sub_adv_ex'] = accuracy
-
-    time_start = time.time()
-    # Evaluate the accuracy of the "black-box" model on adversarial examples
-    x_adv_sub_np = attacker.generate_np(adv_inputs, **attacker_params)
-    accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_np, ori_labels,
-                          args=eval_params)
-    print('Test accuracy of oracle on adversarial examples generated '
-          'using the substitute (NP): ' + str(accuracy))
-    accuracies['bbox_on_sub_adv_ex'] = accuracy
+    else:
+        # Evaluate the accuracy of the "black-box" model on adversarial examples
+        x_adv_sub_np = attacker.generate_np(adv_inputs, **attacker_params)
+        accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_np, ori_labels,
+                              args=eval_params)
+        print('Test accuracy of oracle on adversarial examples generated '
+              'using the substitute (NP): ' + str(accuracy))
+        accuracies['bbox_on_sub_adv_ex'] = accuracy
     time_end = time.time()
     print('Attack time:', time_end - time_start)
 
     # Evaluate the targeted attack
-    bbox_adv_predict = batch_eval(sess, [x], [bbox_preds], [x_adv_sub_np],
-                          args=eval_params)[0]
+    if attack == "fgsm":
+        bbox_adv_predict = batch_eval(sess, [x], [model(x_adv_sub)], [adv_inputs], feed={t_y: adv_ys},
+                              args=eval_params)[0]
+    else:
+        bbox_adv_predict = batch_eval(sess, [x], [bbox_preds], [x_adv_sub_np],
+                              args=eval_params)[0]
     bbox_adv_class = np.argmax(bbox_adv_predict, axis = 1)
     print(bbox_adv_class)
     print(true_class)
@@ -438,19 +457,19 @@ def mnist_blackbox(train_start=0, train_end=60000, test_start=0,
 
     if attack == "fgsm":
         # Evaluate the accuracy of the "black-box" model on adversarial examples (excluding correct)
-        accuracy = model_eval(sess, x, y, model(x_adv_sub), adv_inputs[mask], ori_labels[mask],
+        accuracy = model_eval(sess, x, y, model(x_adv_sub), adv_inputs[mask], ori_labels[mask], feed={t_y: adv_ys[mask]},
                               args=eval_params)
         print('Test accuracy of oracle on adversarial examples generated '
               'using the substitute (excluding originally incorrect labels): ' + str(accuracy))
         accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
-
-    # Evaluate the accuracy of the "black-box" model on adversarial examples (excluding correct)
-    x_adv_sub_mask_np = x_adv_sub_np[mask]
-    accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_mask_np, ori_labels[mask],
-                          args=eval_params)
-    print('Test accuracy of oracle on adversarial examples generated '
-          'using the substitute (excluding originally incorrect labels, NP): ' + str(accuracy))
-    accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
+    else:
+        # Evaluate the accuracy of the "black-box" model on adversarial examples (excluding correct)
+        x_adv_sub_mask_np = x_adv_sub_np[mask]
+        accuracy = model_eval(sess, x, y, bbox_preds, x_adv_sub_mask_np, ori_labels[mask],
+                              args=eval_params)
+        print('Test accuracy of oracle on adversarial examples generated '
+              'using the substitute (excluding originally incorrect labels, NP): ' + str(accuracy))
+        accuracies['bbox_on_sub_adv_ex_exc'] = accuracy
 
     return accuracies
 
