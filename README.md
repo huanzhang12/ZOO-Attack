@@ -23,6 +23,11 @@ an unified interface `test_all.py` is added.
 
 For more details, please see our paper:
 
+[ZOO: Zeroth Order Optimization based Black-box Attacks to Deep Neural Networks without Training Substitute Models](https://arxiv.org/abs/1708.03999)
+by Pin-Yu Chen\*, Huan Zhang\*, Yash Sharma, Jinfeng Yi, Cho-Jui Hsieh
+
+\* Equal contribution
+
 
 Setup and train models
 -------------------------------------
