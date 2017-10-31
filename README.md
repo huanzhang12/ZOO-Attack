@@ -38,7 +38,7 @@ packages are required:
 ```
 sudo apt-get install python3-pip
 sudo pip3 install --upgrade pip
-sudo pip3 install pillow scipy numpy tensorflow-gpu keras h5py
+sudo pip3 install pillow scipy numpy tensorflow-gpu keras h5py numba
 ```
 
 Prepare the MNIST and CIFAR-10 data and models for attack:

@@ -27,8 +27,8 @@ def show(img, name = "output.png"):
     """
     Show MNSIT digits in the console.
     """
-    np.save('img', img)
-    fig = (img + 0.5)*255
+    np.save(name, img)
+    fig = np.around((img + 0.5)*255)
     fig = fig.astype(np.uint8).squeeze()
     pic = Image.fromarray(fig)
     # pic.resize((512,512), resample=PIL.Image.BICUBIC)
@@ -134,8 +134,8 @@ def main(args):
             inputs = all_inputs[i:i+1]
             targets = all_targets[i:i+1]
             labels = all_labels[i:i+1]
-            print("true labels:", labels)
-            print("target:", targets)
+            print("true labels:", np.argmax(labels), labels)
+            print("target:", np.argmax(targets), targets)
             # test if the image is correctly classified
             original_predict = model.model.predict(inputs)
             original_predict = np.squeeze(original_predict)

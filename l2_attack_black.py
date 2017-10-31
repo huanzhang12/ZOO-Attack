@@ -497,7 +497,10 @@ class BlackBoxL2:
         def compare(x,y):
             if not isinstance(x, (float, int, np.int64)):
                 x = np.copy(x)
-                x[y] -= self.CONFIDENCE
+                if self.TARGETED:
+                    x[y] -= self.CONFIDENCE
+                else:
+                    x[y] += self.CONFIDENCE
                 x = np.argmax(x)
             if self.TARGETED:
                 return x == y
@@ -636,6 +639,7 @@ class BlackBoxL2:
                     # print a message if it is the first attack found
                     if o_bestl2 == 1e10:
                         print("[STATS][L3](First valid attack found!) iter = {}, cost = {}, time = {:.3f}, size = {}, loss = {:.5g}, loss1 = {:.5g}, loss2 = {:.5g}, l2 = {:.5g}".format(iteration, eval_costs, train_timer, self.real_modifier.shape, l, loss1, loss2, l2))
+                        sys.stdout.flush()
                     o_bestl2 = l2
                     o_bestscore = np.argmax(score)
                     o_bestattack = nimg
