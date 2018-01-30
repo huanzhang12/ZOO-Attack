@@ -58,7 +58,7 @@ To prepare the ImageNet dataset, download and unzip the following archive:
 [ImageNet Test Set](http://jaina.cs.ucdavis.edu/datasets/adv/imagenet/img.tar.gz)
 
 
-and put the `imgs` folder in `../imagesnetdata`. This path can be changed
+and put the `imgs` folder in `../imagenetdata`. This path can be changed
 in `setup_inception.py`.
 
 Run attacks
