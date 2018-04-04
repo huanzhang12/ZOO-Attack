@@ -51,24 +51,6 @@ import numpy as np
 from six.moves import urllib
 import tensorflow as tf
 
-FLAGS = tf.app.flags.FLAGS
-
-# classify_image_graph_def.pb:
-#   Binary representation of the GraphDef protocol buffer.
-# imagenet_synset_to_human_label_map.txt:
-#   Map from synset ID to a human readable string.
-# imagenet_2012_challenge_label_map_proto.pbtxt:
-#   Text representation of a protocol buffer mapping a label to synset ID.
-tf.app.flags.DEFINE_string(
-    'model_dir', 'tmp/imagenet',
-    """Path to classify_image_graph_def.pb, """
-    """imagenet_synset_to_human_label_map.txt, and """
-    """imagenet_2012_challenge_label_map_proto.pbtxt.""")
-tf.app.flags.DEFINE_string('image_file', '',
-                           """Absolute path to image file.""")
-tf.app.flags.DEFINE_integer('num_top_predictions', 5,
-                            """Display this many predictions.""")
-
 # pylint: disable=line-too-long
 DATA_URL = 'http://jaina.cs.ucdavis.edu/datasets/adv/imagenet/inception_v3_2016_08_28_frozen.tar.gz'
 # pylint: enable=line-too-long
@@ -318,4 +300,23 @@ class ImageNet:
 
 
 if __name__ == '__main__':
+  FLAGS = tf.app.flags.FLAGS
+  # classify_image_graph_def.pb:
+  #   Binary representation of the GraphDef protocol buffer.
+  # imagenet_synset_to_human_label_map.txt:
+  #   Map from synset ID to a human readable string.
+  # imagenet_2012_challenge_label_map_proto.pbtxt:
+  #   Text representation of a protocol buffer mapping a label to synset ID.
+  tf.app.flags.DEFINE_string(
+      'model_dir', 'tmp/imagenet',
+      """Path to classify_image_graph_def.pb, """
+      """imagenet_synset_to_human_label_map.txt, and """
+      """imagenet_2012_challenge_label_map_proto.pbtxt.""")
+  tf.app.flags.DEFINE_string('image_file', '',
+			     """Absolute path to image file.""")
+  tf.app.flags.DEFINE_integer('num_top_predictions', 5,
+			      """Display this many predictions.""")
   tf.app.run()
+else:
+  from argparse import Namespace
+  FLAGS = Namespace(model_dir="tmp/imagenet")  
