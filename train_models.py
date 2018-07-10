@@ -1,5 +1,6 @@
 ## train_models.py -- train the neural network models for attacking
 ##
+## Copyright (C) IBM Corp, 2017-2018
 ## Copyright (C) 2016, Nicholas Carlini <nicholas@carlini.com>.
 ##
 ## This program is licenced under the BSD 2-Clause licence,

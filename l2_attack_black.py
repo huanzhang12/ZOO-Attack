@@ -1,5 +1,6 @@
 ## l2_attack_black.py -- attack a black-box network optimizing for l_2 distance
 ##
+## Copyright (C) IBM Corp, 2017-2018
 ## Copyright (C) 2017, Huan Zhang <ecezhang@ucdavis.edu>.
 ## Copyright (C) 2016, Nicholas Carlini <nicholas@carlini.com>.
 ##

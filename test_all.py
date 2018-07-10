@@ -1,5 +1,6 @@
 ## test_attack.py -- sample code to test attack procedure
 ##
+## Copyright (C) IBM Corp, 2017-2018
 ## Copyright (C) 2017, Huan Zhang <ecezhang@ucdavis.edu>.
 ## Copyright (C) 2016, Nicholas Carlini <nicholas@carlini.com>.
 ##

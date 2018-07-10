@@ -1,3 +1,4 @@
+## Copyright (C) IBM Corp, 2017-2018
 ## Modified by Huan Zhang for the updated Inception-v3 model (inception_v3_2016_08_28.tar.gz)
 ## Modified by Nicholas Carlini to match model structure for attack code.
 ## Original copyright license follows.
