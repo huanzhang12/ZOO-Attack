@@ -1,3 +1,5 @@
+**As requested by IBM, this repository is moved to https://github.com/IBM/ZOO-Attack, but we aim to keep both repositories synced up.** The code is released under Apache License v2.
+
 ZOO: Zeroth Order Optimization based Black-box Attacks to Deep Neural Networks 
 =====================================
 
