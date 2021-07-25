@@ -57,7 +57,7 @@ python3 setup_inception.py
 
 To prepare the ImageNet dataset, download and unzip the following archive:
 
-[ImageNet Test Set](http://jaina.cs.ucdavis.edu/datasets/adv/imagenet/img.tar.gz)
+http://download.huan-zhang.com/datasets/adv/img.tar.gz
 
 
 and put the `imgs` folder in `../imagenetdata`. This path can be changed
